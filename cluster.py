@@ -3,41 +3,11 @@
 
 import sys
 import argparse
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String
-from sqlalchemy.orm import sessionmaker
 import glob
 import re
 import itertools
-from sqlalchemy import func, distinct
 import math
-
-
-Base = declarative_base()
-
-Session = sessionmaker()
-engine = create_engine('sqlite:///:memory:', echo=False)
-Session.configure(bind=engine)
-
-
-class IndexEntry(Base):
-    __tablename__ = 'IndexEntry'
-
-    id = Column(Integer, primary_key=True)
-    cluster = Column(Integer)
-    doc_id = Column(Integer)
-
-    def __init__(self, cluster, doc_id):
-        self.cluster = cluster
-        self.doc_id = doc_id
-
-    def __repr__(self):
-        return "{} {}".format(self.cluster, self.doc_id)
-
-
-
-Base.metadata.create_all(engine)
+from collections import defaultdict
 
 
 
@@ -48,21 +18,21 @@ def document_generator(path):
             yield [x for x in line.strip().split() if x]
 
 def test_doc_gen():
-    for path in glob.glob('review_polarity/txt_sentoken/*/cv*')[:50]:
+    for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
             sys.stderr.write('.')
             sys.stderr.flush()
-            yield [x for x in re.split('\s+', f.read()) if x]
+            yield [x for x in re.split('\s+', f.read().lower()) if x]
 
 
 class DocumentLevelClusters(object):
-    def __init__(self, doc_generator, batch_size=100):
+    def __init__(self, doc_generator, batch_size=1000):
         self.batch_size = batch_size
-        self.session = Session()
         self.cluster_parents = {}
         self.cluster_ids = {}
         self.cluster_counter = 0
-        self.index_documents(doc_generator)
+        self.index = defaultdict(set)  # word ID -> list of doc IDs
+        self.create_index(doc_generator)
         self.cluster_bits = {}
         self.word_bitstrings = {x: None for x in self.cluster_ids.keys()}  # word/cluster labels to bitstrings (initialize to include all words as keys)
         
@@ -78,14 +48,13 @@ class DocumentLevelClusters(object):
             self.cluster_bits[c2] = '1'
 
             # merge the clusters in the index
-            self.relabel(c1, self.cluster_counter)
-            self.relabel(c2, self.cluster_counter)
+            self.merge(c1, c2, self.cluster_counter)
 
             # increment the cluster index counter
             self.cluster_counter += 1
 
             word_clusters = self.current_clusters()
-            print('MERGING:\t{}\t{}'.format(c1, c2), file=sys.stderr)
+            print('MERGED:\t{}\t{}'.format(c1, c2), file=sys.stderr)
 
         self.create_bitstrings()
 
@@ -103,42 +72,38 @@ class DocumentLevelClusters(object):
         max_score = float('-inf')
         argmax_score = None
 
-        logcounts = {x[0]: math.log(x[1]) for x in self.session.query(IndexEntry.cluster, func.count()).group_by(IndexEntry.cluster).order_by(func.count().desc()).limit(self.batch_size).all()}
-
-        for c1, c2 in itertools.combinations(logcounts, 2):
+        for c1, c2 in itertools.combinations(self.index.keys(), 2):
             count_c1_c2 = self.count_pair(c1, c2)
             if count_c1_c2 == 0:
                 continue
-            score = math.log(count_c1_c2) - logcounts[c1] - logcounts[c2]
+            score = math.log(count_c1_c2) - math.log(self.count(c1)) - math.log(self.count(c2))
             if score > max_score:
                 max_score = score
                 argmax_score = (c1, c2)
         return argmax_score
 
-    def relabel(self, old_id, new_id):
-        for entry in self.session.query(IndexEntry).filter(IndexEntry.cluster == old_id).all():
-            entry.word = new_id
-        self.session.commit()
+    def merge(self, c1, c2, new_id):
+        self.index[new_id] = self.index[c1] | self.index[c2]
+        del self.index[c1]
+        del self.index[c2]
 
-    def index_documents(self, doc_generator):
+    def create_index(self, doc_generator):
         for doc_id, doc in enumerate(doc_generator):
             for w in set(doc):
                 if w not in self.cluster_ids:
                     self.cluster_ids[w] = self.cluster_counter
                     self.cluster_counter += 1
-                self.session.add(IndexEntry(self.cluster_ids[w], doc_id))
-            self.session.commit()
+                self.index[self.cluster_ids[w]].add(doc_id)
 
-        #print("# the = {}".format(self.session.query(IndexEntry).filter(IndexEntry.cluster == 'the').count()), file=sys.stderr)
 
     def current_clusters(self):
-        return [x[0] for x in self.session.query(distinct(IndexEntry.cluster)).all()]
+        return self.index.keys()
 
     def count(self, c1):
-        return self.session.query(IndexEntry.id).filter(IndexEntry.cluster == c1).count()
+        return len(self.index[c1])
 
     def count_pair(self, c1, c2):
-        return self.session.query(IndexEntry.id).filter(IndexEntry.cluster == c1).union(self.session.query(IndexEntry.id).filter(IndexEntry.cluster == c2)).count()
+        return len(self.index[c1] & self.index[c2])
 
 
 def main():
