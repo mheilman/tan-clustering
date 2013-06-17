@@ -20,7 +20,7 @@ def document_generator(path):
             yield [x for x in line.strip().split() if x]
 
 def test_doc_gen():
-    for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
+    for path in glob.glob('review_polarity/txt_sentoken/*/cv*')[:100]:
         with open(path) as f:
             sys.stderr.write('.')
             sys.stderr.flush()
@@ -28,15 +28,14 @@ def test_doc_gen():
 
 
 class DocumentLevelClusters(object):
-    def __init__(self, doc_generator, batch_size=1000):
+    def __init__(self, doc_generator, batch_size=100):
         self.batch_size = batch_size
         self.cluster_parents = {}
-        self.cluster_ids = {}
         self.cluster_counter = 0
         self.index = defaultdict(set)  # word ID -> list of doc IDs
+        self.word_bitstrings = {}  # word/cluster labels to bitstrings (initialize to include all words as keys)
         self.create_index(doc_generator)
         self.cluster_bits = {}
-        self.word_bitstrings = {x: None for x in self.cluster_ids.keys()}  # word/cluster labels to bitstrings (initialize to include all words as keys)
         
         # initialize the dictionary of classes to consider merging and their log counts
         most_common_words = sorted(self.index.keys(), key=lambda x: -len(self.index[x]))
@@ -44,8 +43,7 @@ class DocumentLevelClusters(object):
         most_common_words = most_common_words[self.batch_size:]
 
         print('\n{} CLUSTERING'.format(curtimestr()), file=sys.stderr)
-        word_clusters = self.current_clusters()
-        while len(word_clusters) > 1:
+        while len(self.index) > 1:
             # find the best to merge
             c1, c2 = self.find_pair_to_merge(current_batch)
 
@@ -57,9 +55,7 @@ class DocumentLevelClusters(object):
 
             # remove the merged clusters from the batch, add the new one and the next most frequent word (if available)
             self.update_batch(c1, c2, new_cluster, current_batch, most_common_words)
-            
-            word_clusters = self.current_clusters()
-            print('{}\t{} AND {} WERE MERGED INTO {}. {} REMAIN.'.format(curtimestr(), c1, c2, new_cluster, len(word_clusters)), file=sys.stderr)
+            print('{}\t{} AND {} WERE MERGED INTO {}. {} REMAIN.'.format(curtimestr(), c1, c2, new_cluster, len(self.index)), file=sys.stderr)
 
             self.cluster_counter += 1
 
@@ -76,7 +72,7 @@ class DocumentLevelClusters(object):
     def create_bitstrings(self):
         for w in self.word_bitstrings:
             # walk up the tree until there is no parent cluster
-            cur_cluster = self.cluster_ids[w]
+            cur_cluster = w
             bitstring = ""
             while cur_cluster in self.cluster_parents:
                 bitstring += self.cluster_bits[cur_cluster]
@@ -116,14 +112,8 @@ class DocumentLevelClusters(object):
     def create_index(self, doc_generator):
         for doc_id, doc in enumerate(doc_generator):
             for w in set(doc):
-                if w not in self.cluster_ids:
-                    self.cluster_ids[w] = self.cluster_counter
-                    self.cluster_counter += 1
-                self.index[self.cluster_ids[w]].add(doc_id)
-
-
-    def current_clusters(self):
-        return self.index.keys()
+                self.word_bitstrings[w] = None
+                self.index[w].add(doc_id)
 
 
 def main():
