@@ -24,7 +24,8 @@ def test_doc_gen():
         with open(path) as f:
             sys.stderr.write('.')
             sys.stderr.flush()
-            yield [x for x in re.split('\s+', f.read().lower()) if x]
+            for line in f.readlines():
+                yield [x for x in re.split('\s+', line.strip().lower()) if x]
 
 
 class DocumentLevelClusters(object):
