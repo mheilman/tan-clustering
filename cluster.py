@@ -20,7 +20,7 @@ def document_generator(path):
             yield [x for x in line.strip().split() if x]
 
 def test_doc_gen():
-    for path in glob.glob('review_polarity/txt_sentoken/*/cv*')[:5]:
+    for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
             sys.stderr.write('.')
             sys.stderr.flush()
@@ -28,7 +28,7 @@ def test_doc_gen():
 
 
 class DocumentLevelClusters(object):
-    def __init__(self, doc_generator, batch_size=100):
+    def __init__(self, doc_generator, batch_size=1000):
         self.batch_size = batch_size
         self.cluster_parents = {}
         self.cluster_ids = {}
