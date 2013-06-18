@@ -51,7 +51,7 @@ def document_generator(path):
             yield [x for x in line.strip().split() if x]
 
 def test_doc_gen():
-    for path in glob.glob('review_polarity/txt_sentoken/*/cv*')[:10]:
+    for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
             sys.stderr.write('.')
             sys.stderr.flush()
