@@ -98,12 +98,11 @@ class DocumentLevelClusters(object):
         # number of documents in the input.
         most_common_words = sorted(self.index.keys(), key=lambda x: -len(self.index[x]))
         self.current_batch = most_common_words[:(self.batch_size + 1)]
-        self.current_batch_scores = list(filter(lambda x: np.isfinite(x[0]), 
-                                      ((self.log_count_pair(c1, c2)
+        self.current_batch_scores = list(((self.log_count_pair(c1, c2)
                                       - self.log_count(c1) 
                                       - self.log_count(c2), (c1, c2)) 
                                      for c1, c2 in 
-                                     itertools.combinations(self.current_batch, 2))))
+                                     itertools.combinations(self.current_batch, 2)))
 
         # remove the first batch_size elements
         most_common_words = most_common_words[(self.batch_size + 1):]
@@ -145,21 +144,14 @@ class DocumentLevelClusters(object):
             new_items.append(new_word)
 
         # add to the batch and score the new cluster pairs that result
-        self.current_batch_scores.extend(filter(lambda x: np.isfinite(x[0]), 
-                                          ((self.log_count_pair(n1, n2)
+        self.current_batch_scores.extend(((self.log_count_pair(n1, n2)
                                           - self.log_count(n1) 
                                           - self.log_count(n2), (n1, n2)) 
                                           for n1, n2 in 
-                                          itertools.product(new_items, self.current_batch))))
+                                          itertools.product(new_items, self.current_batch)))
         self.current_batch.extend(new_items)
 
     def find_best(self):
-        # in the off case that there are no pairs with finite scores
-        # TODO remove np.finite filters and this???
-        if not self.current_batch_scores:
-            np.random.shuffle(self.current_batch)
-            return self.current_batch[0], self.current_batch[1]
-
         best_score, (c1, c2) = self.current_batch_scores[0]
         for score, (tmp1, tmp2) in self.current_batch_scores:
             if score > best_score:
