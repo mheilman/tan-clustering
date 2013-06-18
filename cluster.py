@@ -96,13 +96,10 @@ class DocumentLevelClusters(object):
         # frequent words.  Note that the count-based score is proportional to 
         # the PMI since the probabilities are divided by a constant for the
         # number of documents in the input.
-        most_common_words = sorted(self.index.keys(), key=lambda x: -len(self.index[x]))
+        most_common_words = sorted(self.index.keys(), 
+                                   key=lambda x: -len(self.index[x]))
         self.current_batch = most_common_words[:(self.batch_size + 1)]
-        self.current_batch_scores = list(((self.log_count_pair(c1, c2)
-                                      - self.log_count(c1) 
-                                      - self.log_count(c2), (c1, c2)) 
-                                     for c1, c2 in 
-                                     itertools.combinations(self.current_batch, 2)))
+        self.current_batch_scores = list(self.make_pair_scores(itertools.combinations(self.current_batch, 2)))
 
         # remove the first batch_size elements
         most_common_words = most_common_words[(self.batch_size + 1):]
@@ -144,12 +141,27 @@ class DocumentLevelClusters(object):
             new_items.append(new_word)
 
         # add to the batch and score the new cluster pairs that result
-        self.current_batch_scores.extend(((self.log_count_pair(n1, n2)
-                                          - self.log_count(n1) 
-                                          - self.log_count(n2), (n1, n2)) 
-                                          for n1, n2 in 
-                                          itertools.product(new_items, self.current_batch)))
+        self.current_batch_scores.extend(self.make_pair_scores(itertools.product(new_items, self.current_batch)))
+
+        # note: make the scores first with itertools.product 
+        # (before adding new_items to current_batch) to avoid duplicates
         self.current_batch.extend(new_items)
+
+    def make_pair_scores(self, pair_iter):
+        for c1, c2 in pair_iter:
+            paircount = len(self.index[c1] & self.index[c2])
+            if paircount == 0:
+                yield (float('-inf'), (c1, c1))  # log(0)
+                continue
+            if c1 not in self.log_counts:
+                self.log_counts[c1] = np.log(len(self.index[c1]))
+            if c2 not in self.log_counts:
+                self.log_counts[c2] = np.log(len(self.index[c2]))
+
+            yield (np.log(paircount) 
+                  - self.log_counts[c1] 
+                  - self.log_counts[c2],
+                  (c1, c2))
 
     def find_best(self):
         best_score, (c1, c2) = self.current_batch_scores[0]
@@ -169,17 +181,6 @@ class DocumentLevelClusters(object):
                 cur_cluster = self.cluster_parents[cur_cluster]
 
             self.word_bitstrings[w] = bitstring
-
-    def log_count(self, c1):
-        if c1 not in self.log_counts:
-            self.log_counts[c1] = np.log(len(self.index[c1]))
-        return self.log_counts[c1]
-
-    def log_count_pair(self, c1, c2):
-        count = len(self.index[c1] & self.index[c2])
-        if count == 0:
-            return float('-inf')  # log(0)
-        return np.log(count)
 
     def merge(self, c1, c2, new_id):
         self.cluster_parents[c1] = new_id
