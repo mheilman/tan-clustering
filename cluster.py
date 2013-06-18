@@ -155,6 +155,7 @@ class DocumentLevelClusters(object):
 
     def find_best(self):
         # in the off case that there are no pairs with finite scores
+        # TODO remove np.finite filters and this???
         if not self.current_batch_scores:
             np.random.shuffle(self.current_batch)
             return self.current_batch[0], self.current_batch[1]
