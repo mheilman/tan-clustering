@@ -33,6 +33,7 @@ Author: Michael Heilman
 
 '''
 
+import random
 import sys
 import argparse
 import glob
@@ -41,7 +42,9 @@ import itertools
 import logging
 from collections import defaultdict
 from time import gmtime, strftime
-import numpy
+import numpy as np
+
+np.random.seed(1234567890)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
@@ -95,11 +98,12 @@ class DocumentLevelClusters(object):
         # number of documents in the input.
         most_common_words = sorted(self.index.keys(), key=lambda x: -len(self.index[x]))
         self.current_batch = most_common_words[:(self.batch_size + 1)]
-        self.current_batch_scores = [(self.log_count_pair(c1, c2)
+        self.current_batch_scores = list(filter(lambda x: np.isfinite(x[0]), 
+                                      ((self.log_count_pair(c1, c2)
                                       - self.log_count(c1) 
                                       - self.log_count(c2), (c1, c2)) 
                                      for c1, c2 in 
-                                     itertools.combinations(self.current_batch, 2)]
+                                     itertools.combinations(self.current_batch, 2))))
 
         # remove the first batch_size elements
         most_common_words = most_common_words[(self.batch_size + 1):]
@@ -132,7 +136,7 @@ class DocumentLevelClusters(object):
                               if x != c1 and x != c2]
         self.current_batch_scores = [x for x in self.current_batch_scores 
                                      if not (x[1][0] is c1 or x[1][1] is c1 
-                                             or x[1][0] is c2 or x[1][1] != c2)]
+                                             or x[1][0] is c2 or x[1][1] is c2)]
         
         # find what to add to the current batch
         new_items = [new_cluster]
@@ -141,15 +145,20 @@ class DocumentLevelClusters(object):
             new_items.append(new_word)
 
         # add to the batch and score the new cluster pairs that result
-        self.current_batch_scores.extend((self.log_count_pair(n1, n2)
+        self.current_batch_scores.extend(filter(lambda x: np.isfinite(x[0]), 
+                                          ((self.log_count_pair(n1, n2)
                                           - self.log_count(n1) 
                                           - self.log_count(n2), (n1, n2)) 
                                           for n1, n2 in 
-                                          itertools.product(new_items, self.current_batch))
+                                          itertools.product(new_items, self.current_batch))))
         self.current_batch.extend(new_items)
 
     def find_best(self, current_batch_scores):
-        best_score, (c1, c2) = current_batch_scores[0]
+        # default to a random element, to break any ties 
+        # (not sure if this is necessary, but it might be for certain cases)
+        r = np.random.randint(0, len(current_batch_scores))
+        best_score, (c1, c2) = current_batch_scores[r]
+
         for score, (tmp1, tmp2) in current_batch_scores:
             if score > best_score:
                 best_score = score
@@ -169,20 +178,21 @@ class DocumentLevelClusters(object):
 
     def log_count(self, c1):
         if c1 not in self.log_counts:
-            self.log_counts[c1] = numpy.log(len(self.index[c1]))
+            self.log_counts[c1] = np.log(len(self.index[c1]))
         return self.log_counts[c1]
 
     def log_count_pair(self, c1, c2):
         count = len(self.index[c1] & self.index[c2])
         if count == 0:
             return float('-inf')  # log(0)
-        return numpy.log(count)
+        return np.log(count)
 
     def merge(self, c1, c2, new_id):
         self.cluster_parents[c1] = new_id
         self.cluster_parents[c2] = new_id
-        self.cluster_bits[c1] = '0'  # assign the bits arbitrarily
-        self.cluster_bits[c2] = '1'
+        r = np.random.randint(0, 1)
+        self.cluster_bits[c1] = str(r)  # assign the bits arbitrarily
+        self.cluster_bits[c2] = str(1 - r)
 
         self.index[new_id] = self.index[c1] | self.index[c2]
         del self.index[c1]
