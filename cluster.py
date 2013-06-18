@@ -67,8 +67,10 @@ class DocumentLevelClusters(object):
     The initializer takes a document generator, which is simply an iterator 
     over lists of tokens.  You can define this however you wish.
     '''
-    def __init__(self, doc_generator, batch_size=1000):
+    def __init__(self, doc_generator, batch_size=1000, max_vocab_size=None):
         self.batch_size = batch_size
+
+        self.max_vocab_size = max_vocab_size
 
         # mapping from cluster IDs to cluster IDs, 
         # to keep track of the hierarchy
@@ -92,19 +94,21 @@ class DocumentLevelClusters(object):
         # create sets of documents that each word appears in
         self.create_index(doc_generator)
         
-        # find the most frequent words, score potential clusters for the most 
+        # find the most frequent words
+        # apply document count threshold.  
+        # include up to max_vocab_size words (or fewer if there are ties).
+        freq_words = self.create_vocab()
+
+        # score potential clusters for the most 
         # frequent words.  Note that the count-based score is proportional to 
         # the PMI since the probabilities are divided by a constant for the
         # number of documents in the input.
-        most_common_words = sorted(self.index.keys(), 
-                                   key=lambda x: -len(self.index[x]))
-        self.current_batch = most_common_words[:(self.batch_size + 1)]
+        self.current_batch = freq_words[:(self.batch_size + 1)]
         self.current_batch_scores = list(self.make_pair_scores(itertools.combinations(self.current_batch, 2)))
 
         # remove the first batch_size elements
-        most_common_words = most_common_words[(self.batch_size + 1):]
+        freq_words = freq_words[(self.batch_size + 1):]
 
-        logging.info('CLUSTERING')
         while len(self.index) > 1:
             # find the best pair of words/clusters to merge
             c1, c2 = self.find_best()
@@ -117,7 +121,7 @@ class DocumentLevelClusters(object):
 
             # remove the merged clusters from the batch, add the new one
             # and the next most frequent word (if available)
-            self.update_batch(c1, c2, new_cluster, most_common_words)
+            self.update_batch(c1, c2, new_cluster, freq_words)
 
             logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
                   .format(c1, c2, new_cluster, len(self.index)))
@@ -126,7 +130,32 @@ class DocumentLevelClusters(object):
         # walk up the hierarchy from each word to create its bitstring
         self.create_bitstrings()
 
-    def update_batch(self, c1, c2, new_cluster, most_common_words):
+    def create_vocab(self):
+        freq_words = sorted(self.index.keys(), 
+                            key=lambda w: len(self.index[w]), reverse=True)
+
+        if self.max_vocab_size is not None \
+           and len(freq_words) > self.max_vocab_size:
+            too_rare = len(self.index[freq_words[self.max_vocab_size + 1]])
+            if too_rare == len(self.index[freq_words[0]]):
+                too_rare += 1
+                logging.info("max_vocab_size too low.  Using all words that" +
+                             " appeared in >= {} documents.".format(too_rare))
+                
+            freq_words = [w for w in freq_words 
+                          if len(self.index[w]) > too_rare]
+            freq_words_set = set(freq_words)
+            index_keys = list(self.index.keys())
+            for key in index_keys:
+                if key not in freq_words_set:
+                    del self.index[key]
+
+        for w in freq_words:
+            self.word_bitstrings[w] = None
+
+        return freq_words
+
+    def update_batch(self, c1, c2, new_cluster, freq_words):
         # remove the clusters that were merged (and the scored pairs for them)
         self.current_batch = [x for x in self.current_batch 
                               if x != c1 and x != c2]
@@ -136,8 +165,8 @@ class DocumentLevelClusters(object):
         
         # find what to add to the current batch
         new_items = [new_cluster]
-        if most_common_words:
-            new_word = most_common_words.pop(0)
+        if freq_words:
+            new_word = freq_words.pop(0)
             new_items.append(new_word)
 
         # add to the batch and score the new cluster pairs that result
@@ -172,6 +201,7 @@ class DocumentLevelClusters(object):
         return c1, c2
 
     def create_bitstrings(self):
+        import pdb;pdb.set_trace()
         for w in self.word_bitstrings:
             # walk up the cluster hierarchy until there is no parent cluster
             cur_cluster = w
@@ -196,7 +226,6 @@ class DocumentLevelClusters(object):
     def create_index(self, doc_generator):
         for doc_id, doc in enumerate(doc_generator):
             for w in set(doc):
-                self.word_bitstrings[w] = None
                 self.index[w].add(doc_id)
 
 
