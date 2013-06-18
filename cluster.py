@@ -51,7 +51,7 @@ def document_generator(path):
             yield [x for x in line.strip().split() if x]
 
 def test_doc_gen():
-    for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
+    for path in glob.glob('review_polarity/txt_sentoken/*/cv*')[:10]:
         with open(path) as f:
             sys.stderr.write('.')
             sys.stderr.flush()
@@ -206,13 +206,13 @@ def main():
     c = DocumentLevelClusters(args.input_path)
 
     with open(args.output_path, 'w') as f:
-        for key, val in c.word_bitstrings:
-            print("{}\t{}".format(key, val), file=f)
+        for w, bitstring in c.word_bitstrings.items():
+            print("{}\t{}".format(w, bitstring), file=f)
 
 if __name__ == '__main__':
     # main()
     c = DocumentLevelClusters(test_doc_gen())
 
     with open('bitstrings.txt', 'w') as f:
-        for key, val in c.word_bitstrings:
-            print("{}\t{}".format(key, val), file=f)
+        for w, bitstring in c.word_bitstrings.items():
+            print("{}\t{}".format(w, bitstring), file=f)
