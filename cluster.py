@@ -111,7 +111,7 @@ class DocumentLevelClusters(object):
         logging.info('CLUSTERING')
         while len(self.index) > 1:
             # find the best pair of words/clusters to merge
-            c1, c2 = self.find_best(self.current_batch_scores)
+            c1, c2 = self.find_best()
             
             # pick the new cluster ID and increment the cluster index counter
             new_cluster = 'C\t{}'.format(self.cluster_counter)
@@ -153,13 +153,15 @@ class DocumentLevelClusters(object):
                                           itertools.product(new_items, self.current_batch))))
         self.current_batch.extend(new_items)
 
-    def find_best(self, current_batch_scores):
-        # default to a random element, to break any ties 
-        # (not sure if this is necessary, but it might be for certain cases)
-        r = np.random.randint(0, len(current_batch_scores))
-        best_score, (c1, c2) = current_batch_scores[r]
+    def find_best(self):
+        # in the off case that there are no pairs with finite scores
+        # (probably not necessary)
+        # if not self.current_batch_scores:
+        #     np.random.shuffle(self.current_batch)
+        #     return self.current_batch[0], self.current_batch[1]
 
-        for score, (tmp1, tmp2) in current_batch_scores:
+        best_score, (c1, c2) = self.current_batch_scores[0]
+        for score, (tmp1, tmp2) in self.current_batch_scores:
             if score > best_score:
                 best_score = score
                 c1, c2 = tmp1, tmp2
