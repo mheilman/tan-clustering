@@ -226,6 +226,8 @@ class DocumentLevelClusters(object):
             for w in set(doc):
                 self.index[w].add(doc_id)
 
+        # just add 1 to the last doc id (enumerate starts at zero)
+        logging.info('{} documents were indexed.'.format(doc_id + 1))
 
 def main():
     parser = argparse.ArgumentParser(description='Create hierarchical word' +
