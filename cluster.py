@@ -168,6 +168,7 @@ class DocumentLevelClusters(object):
 
         # add to the batch and score the new cluster pairs that result
         self.current_batch_scores.extend(self.make_pair_scores(itertools.product(new_items, self.current_batch)))
+        self.current_batch_scores.extend(self.make_pair_scores(itertools.combinations(new_items, 2)))
 
         # note: make the scores first with itertools.product 
         # (before adding new_items to current_batch) to avoid duplicates
