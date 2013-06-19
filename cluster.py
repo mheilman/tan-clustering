@@ -192,7 +192,9 @@ class DocumentLevelClusters(object):
     def find_best(self):
         best_score, (c1, c2) = self.current_batch_scores[0]
         for score, (tmp1, tmp2) in self.current_batch_scores:
-            if score > best_score:
+            # break ties randomly
+            if score > best_score \
+               or (score == best_score and np.random.randint(0, 2) == 1):
                 best_score = score
                 c1, c2 = tmp1, tmp2
         return c1, c2
@@ -211,8 +213,8 @@ class DocumentLevelClusters(object):
     def merge(self, c1, c2):
         self.cluster_parents[c1] = self.cluster_counter
         self.cluster_parents[c2] = self.cluster_counter
-        r = np.random.randint(0, 1)
-        self.cluster_bits[c1] = str(r)  # assign the bits arbitrarily
+        r = np.random.randint(0, 2)
+        self.cluster_bits[c1] = str(r)  # assign the bits randomly
         self.cluster_bits[c2] = str(1 - r)
 
         self.index[self.cluster_counter] = self.index[c1] | self.index[c2]
