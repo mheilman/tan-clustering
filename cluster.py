@@ -197,7 +197,6 @@ class DocumentLevelClusters(object):
         return c1, c2
 
     def create_bitstrings(self):
-        import pdb;pdb.set_trace()
         for w in self.word_bitstrings:
             # walk up the cluster hierarchy until there is no parent cluster
             cur_cluster = w
