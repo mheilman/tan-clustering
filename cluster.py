@@ -205,7 +205,7 @@ class DocumentLevelClusters(object):
             cur_cluster = w
             bitstring = ""
             while cur_cluster in self.cluster_parents:
-                bitstring += self.cluster_bits[cur_cluster]
+                bitstring = self.cluster_bits[cur_cluster] + bitstring
                 cur_cluster = self.cluster_parents[cur_cluster]
 
             self.word_bitstrings[w] = bitstring
