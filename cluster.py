@@ -56,10 +56,11 @@ def document_generator(path):
 def test_doc_gen():
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
-            sys.stderr.write('.')
-            sys.stderr.flush()
-            for line in f.readlines():
-                yield [x for x in re.split('\s+', line.strip().lower()) if x]
+            yield re.split(r'\s+', f.read().strip().lower())
+            # sys.stderr.write('.')
+            # sys.stderr.flush()
+            # for line in f.readlines():
+            #     yield [x for x in re.split('\s+', line.strip().lower()) if x]
 
 
 class DocumentLevelClusters(object):
@@ -230,18 +231,19 @@ def main():
     parser.add_argument('input_path', help='input file, one document per' +
         ' line, with whitespace-separated tokens.')
     parser.add_argument('output_path', help='output path')
+    parser.add_argument('--max_vocab_size', help='maximum number of words in the vocabulary (a smaller number will be used if there are ties at the specified level)', default=None, type=int)
+    parser.add_argument('--batch_size', help='number of clusters to merge at one time (runtime is quadratic in this value)', default=1000, type=int)
     args = parser.parse_args()
 
-    c = DocumentLevelClusters(args.input_path)
+    #doc_generator = document_generator(args.input_path)
+    doc_generator = test_doc_gen()
+
+    c = DocumentLevelClusters(doc_generator, max_vocab_size=args.max_vocab_size, batch_size=args.batch_size)
 
     with open(args.output_path, 'w') as f:
         for w, bitstring in c.word_bitstrings.items():
             print("{}\t{}".format(w, bitstring), file=f)
 
 if __name__ == '__main__':
-    # main()
-    c = DocumentLevelClusters(test_doc_gen())
-
-    with open('bitstrings.txt', 'w') as f:
-        for w, bitstring in c.word_bitstrings.items():
-            print("{}\t{}".format(w, bitstring), file=f)
+    main()
+    c = DocumentLevelClusters()
