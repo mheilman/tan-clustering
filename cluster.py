@@ -112,19 +112,16 @@ class DocumentLevelClusters(object):
         while len(self.index) > 1:
             # find the best pair of words/clusters to merge
             c1, c2 = self.find_best()
-            
-            # pick the new cluster ID and increment the cluster index counter
-            new_cluster = 'C\t{}'.format(self.cluster_counter)
 
             # merge the clusters in the index
-            self.merge(c1, c2, new_cluster)
+            self.merge(c1, c2)
 
             # remove the merged clusters from the batch, add the new one
             # and the next most frequent word (if available)
-            self.update_batch(c1, c2, new_cluster, freq_words)
+            self.update_batch(c1, c2, freq_words)
 
             logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
-                  .format(c1, c2, new_cluster, len(self.index)))
+                  .format(c1, c2, self.cluster_counter, len(self.index)))
             self.cluster_counter += 1
 
         # walk up the hierarchy from each word to create its bitstring
@@ -155,16 +152,15 @@ class DocumentLevelClusters(object):
 
         return freq_words
 
-    def update_batch(self, c1, c2, new_cluster, freq_words):
+    def update_batch(self, c1, c2, freq_words):
         # remove the clusters that were merged (and the scored pairs for them)
-        self.current_batch = [x for x in self.current_batch 
-                              if x != c1 and x != c2]
+        self.current_batch = [x for x in self.current_batch if not (x == c1 or x == c2)]
         self.current_batch_scores = [x for x in self.current_batch_scores 
-                                     if not (x[1][0] is c1 or x[1][1] is c1 
-                                             or x[1][0] is c2 or x[1][1] is c2)]
+                                     if not (x[1][0] == c1 or x[1][1] == c1 
+                                             or x[1][0] == c2 or x[1][1] == c2)]
         
         # find what to add to the current batch
-        new_items = [new_cluster]
+        new_items = [self.cluster_counter]
         if freq_words:
             new_word = freq_words.pop(0)
             new_items.append(new_word)
@@ -180,7 +176,7 @@ class DocumentLevelClusters(object):
         for c1, c2 in pair_iter:
             paircount = len(self.index[c1] & self.index[c2])
             if paircount == 0:
-                yield (float('-inf'), (c1, c1))  # log(0)
+                yield (float('-inf'), (c1, c2))  # log(0)
                 continue
             if c1 not in self.log_counts:
                 self.log_counts[c1] = np.log(len(self.index[c1]))
@@ -212,14 +208,14 @@ class DocumentLevelClusters(object):
 
             self.word_bitstrings[w] = bitstring
 
-    def merge(self, c1, c2, new_id):
-        self.cluster_parents[c1] = new_id
-        self.cluster_parents[c2] = new_id
+    def merge(self, c1, c2):
+        self.cluster_parents[c1] = self.cluster_counter
+        self.cluster_parents[c2] = self.cluster_counter
         r = np.random.randint(0, 1)
         self.cluster_bits[c1] = str(r)  # assign the bits arbitrarily
         self.cluster_bits[c2] = str(1 - r)
 
-        self.index[new_id] = self.index[c1] | self.index[c2]
+        self.index[self.cluster_counter] = self.index[c1] | self.index[c2]
         del self.index[c1]
         del self.index[c2]
 
