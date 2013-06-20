@@ -12,16 +12,18 @@ http://acl.ldc.upenn.edu/J/J92/J92-4003.pdf
 While this code creates hierarchical clusters, it does not use the HMM-like 
 sequence model to do so (section 3).  Instead, it merges clusters similar to the
 technique described in section 4 of Brown et al. (1992), using pointwise mutual 
-information.  However, the formulation of PMI used here differs slightly: 
-each word/cluster is associated with a list of documents that it appears in 
-(documents can be full texts, sentences, tweets, etc.).  
-The score for merging two clusters c1 and c2 is proportional to the following:
+information.  However, the formulation of PMI used here differs slightly. 
+Each word/cluster is associated with a list of documents that it appears in 
+(documents can be full texts, sentences, tweets, etc.).
+Also, we use normalized PMI, which ranges from -1 to 1
+(see, e.g., http://en.wikipedia.org/wiki/Pointwise_mutual_information).
+Thus, the score for merging two clusters c1 and c2 is the following:
 
   log [ p(c1 and c2 in document) / p(c1 in document) / p(c2 in document) ]
+    / -log [ p(c1 and c2 in document) ]
 
 The probabilities are maximum likelihood estimates (e.g., number of documents
-with c1 divided by the number of documents).  Since the total number of 
-documents is constant, we just use the counts instead of relative frequencies.
+with c1 divided by the total number of documents).
 
 Also, see http://www.cs.columbia.edu/~cs4705/lectures/brown.pdf for a nice 
 overview.
@@ -56,11 +58,11 @@ def document_generator(path):
 def test_doc_gen():
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
-            yield re.split(r'\s+', f.read().strip().lower())
-            # sys.stderr.write('.')
-            # sys.stderr.flush()
-            # for line in f.readlines():
-            #     yield [x for x in re.split('\s+', line.strip().lower()) if x]
+            # yield re.split(r'\s+', f.read().strip().lower())
+            sys.stderr.write('.')
+            sys.stderr.flush()
+            for line in f.readlines():
+                yield [x for x in re.split('\s+', line.strip().lower()) if x]
 
 
 class DocumentLevelClusters(object):
@@ -70,6 +72,7 @@ class DocumentLevelClusters(object):
     '''
     def __init__(self, doc_generator, batch_size=1000, max_vocab_size=None):
         self.batch_size = batch_size
+        self.num_docs = 0
 
         self.max_vocab_size = max_vocab_size
 
@@ -106,6 +109,9 @@ class DocumentLevelClusters(object):
         # number of documents in the input.
         self.current_batch = freq_words[:(self.batch_size + 1)]
         self.current_batch_scores = list(self.make_pair_scores(itertools.combinations(self.current_batch, 2)))
+
+        # store the initial words, to be used for the final clusters
+        self.initial_words = freq_words[:self.batch_size]
 
         # remove the first batch_size elements
         freq_words = freq_words[(self.batch_size + 1):]
@@ -177,18 +183,44 @@ class DocumentLevelClusters(object):
     def make_pair_scores(self, pair_iter):
         for c1, c2 in pair_iter:
             paircount = len(self.index[c1] & self.index[c2])
-            if paircount == 0:
-                yield (float('-inf'), (c1, c2))  # log(0)
-                continue
-            if c1 not in self.log_counts:
-                self.log_counts[c1] = np.log(len(self.index[c1]))
-            if c2 not in self.log_counts:
-                self.log_counts[c2] = np.log(len(self.index[c2]))
 
-            yield (np.log(paircount) 
-                  - self.log_counts[c1] 
-                  - self.log_counts[c2],
-                  (c1, c2))
+            # PMI
+            # if paircount == 0:
+            #     yield (float('-inf'), (c1, c2))  # log(0)
+            #     continue
+
+            # if c1 not in self.log_counts:
+            #     self.log_counts[c1] = np.log(len(self.index[c1]))
+            # if c2 not in self.log_counts:
+            #     self.log_counts[c2] = np.log(len(self.index[c2]))
+
+            # score = np.log(paircount) \
+            #         - self.log_counts[c1] \
+            #         - self.log_counts[c2]
+
+            # normalized PMI
+            if paircount == 0:
+                yield (-1.0, (c1, c2))
+                continue
+
+            if c1 not in self.log_counts:
+                self.log_counts[c1] = np.log(len(self.index[c1]) / self.num_docs)
+            if c2 not in self.log_counts:
+                self.log_counts[c2] = np.log(len(self.index[c2]) / self.num_docs)
+
+            score = np.log(paircount / self.num_docs) \
+                    - self.log_counts[c1] \
+                    - self.log_counts[c2]
+
+            score /= -np.log(paircount / self.num_docs)
+
+
+            # jaccard similarity
+            # s1 = self.index[c1]
+            # s2 = self.index[c2]
+            # score = float(len(s1 & s2)) / len(s1 | s2)
+
+            yield (score, (c1, c2))
 
     def find_best(self):
         best_score, (c1, c2) = self.current_batch_scores[0]
@@ -228,7 +260,13 @@ class DocumentLevelClusters(object):
                 self.index[w].add(doc_id)
 
         # just add 1 to the last doc id (enumerate starts at zero)
-        logging.info('{} documents were indexed.'.format(doc_id + 1))
+        self.num_docs = doc_id + 1
+        logging.info('{} documents were indexed.'.format(self.num_docs))
+
+    def save_clusters(self, output_path):
+        with open(output_path, 'w') as f:
+            for w, bitstring in self.word_bitstrings.items():
+                print("{}\t{}".format(w, bitstring), file=f)
 
 def main():
     parser = argparse.ArgumentParser(description='Create hierarchical word' +
@@ -236,19 +274,23 @@ def main():
     parser.add_argument('input_path', help='input file, one document per' +
         ' line, with whitespace-separated tokens.')
     parser.add_argument('output_path', help='output path')
-    parser.add_argument('--max_vocab_size', help='maximum number of words in the vocabulary (a smaller number will be used if there are ties at the specified level)', default=None, type=int)
-    parser.add_argument('--batch_size', help='number of clusters to merge at one time (runtime is quadratic in this value)', default=1000, type=int)
+    parser.add_argument('--max_vocab_size', help='maximum number of words in' +
+                        ' the vocabulary (a smaller number will be used if' +
+                        ' there are ties at the specified level)', 
+                        default=None, type=int)
+    parser.add_argument('--batch_size', help='number of clusters to merge at' +
+                        ' one time (runtime is quadratic in this value)',
+                        default=1000, type=int)
     args = parser.parse_args()
 
     #doc_generator = document_generator(args.input_path)
     doc_generator = test_doc_gen()
 
-    c = DocumentLevelClusters(doc_generator, max_vocab_size=args.max_vocab_size, batch_size=args.batch_size)
+    c = DocumentLevelClusters(doc_generator, 
+                              max_vocab_size=args.max_vocab_size, 
+                              batch_size=args.batch_size)
+    c.save_clusters(args.output_path)
 
-    with open(args.output_path, 'w') as f:
-        for w, bitstring in c.word_bitstrings.items():
-            print("{}\t{}".format(w, bitstring), file=f)
 
 if __name__ == '__main__':
     main()
-    c = DocumentLevelClusters()
