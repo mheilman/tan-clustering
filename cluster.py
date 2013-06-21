@@ -55,7 +55,7 @@ def document_generator(path):
         for line in f.readlines():
             yield [x for x in line.strip().split() if x]
 
-def test_doc_gen():
+def test_doc_gen2():
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
             # yield re.split(r'\s+', f.read().strip().lower())
@@ -63,6 +63,16 @@ def test_doc_gen():
             sys.stderr.flush()
             for line in f.readlines():
                 yield [x for x in re.split('\s+', line.strip().lower()) if x]
+
+def test_doc_gen():
+    docs = ['dog cat bird bat whale monkey',
+    'monkey human ape',
+    'human man woman child',
+    'fish whale shark',
+    'man woman teacher lawyer doctor',
+    'fish shark',
+    'bird bat fly']
+    return map(str.split, docs)
 
 
 class DocumentLevelClusters(object):
@@ -84,9 +94,8 @@ class DocumentLevelClusters(object):
         # word ID -> list of doc IDs
         self.index = defaultdict(set)
 
-        # word/cluster labels to bitstrings
-        # (initialize to include all words as keys)
-        self.word_bitstrings = {}
+        # the list of words (after filtering)
+        self.words = []
         
         # the bit to add when walking up the hierarchy 
         # from a word to the top-level cluster
@@ -101,7 +110,10 @@ class DocumentLevelClusters(object):
         # find the most frequent words
         # apply document count threshold.  
         # include up to max_vocab_size words (or fewer if there are ties).
-        freq_words = self.create_vocab()
+        self.create_vocab()
+
+        # make a copy of the list of words
+        freq_words = list(self.words)
 
         # score potential clusters for the most 
         # frequent words.  Note that the count-based score is proportional to 
@@ -116,7 +128,7 @@ class DocumentLevelClusters(object):
         # remove the first batch_size elements
         freq_words = freq_words[(self.batch_size + 1):]
 
-        while len(self.index) > 1:
+        while len(self.current_batch) > 1:
             # find the best pair of words/clusters to merge
             c1, c2 = self.find_best()
 
@@ -128,40 +140,34 @@ class DocumentLevelClusters(object):
             self.update_batch(c1, c2, freq_words)
 
             logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
-                  .format(c1, c2, self.cluster_counter, len(self.index)))
+                  .format(c1, c2, self.cluster_counter, 
+                          len(self.current_batch) + len(freq_words) - 1))
             self.cluster_counter += 1
 
-        # walk up the hierarchy from each word to create its bitstring
-        self.create_bitstrings()
-
     def create_vocab(self):
-        freq_words = sorted(self.index.keys(), 
+        self.words = sorted(self.index.keys(), 
                             key=lambda w: len(self.index[w]), reverse=True)
 
         if self.max_vocab_size is not None \
-           and len(freq_words) > self.max_vocab_size:
-            too_rare = len(self.index[freq_words[self.max_vocab_size + 1]])
-            if too_rare == len(self.index[freq_words[0]]):
+           and len(self.words) > self.max_vocab_size:
+            too_rare = len(self.index[self.words[self.max_vocab_size + 1]])
+            if too_rare == len(self.index[self.words[0]]):
                 too_rare += 1
                 logging.info("max_vocab_size too low.  Using all words that" +
                              " appeared in >= {} documents.".format(too_rare))
                 
-            freq_words = [w for w in freq_words 
+            self.words = [w for w in self.words 
                           if len(self.index[w]) > too_rare]
-            freq_words_set = set(freq_words)
+            words_set = set(self.words)
             index_keys = list(self.index.keys())
             for key in index_keys:
-                if key not in freq_words_set:
+                if key not in words_set:
                     del self.index[key]
-
-        for w in freq_words:
-            self.word_bitstrings[w] = None
-
-        return freq_words
 
     def update_batch(self, c1, c2, freq_words):
         # remove the clusters that were merged (and the scored pairs for them)
-        self.current_batch = [x for x in self.current_batch if not (x == c1 or x == c2)]
+        self.current_batch = [x for x in self.current_batch
+                              if not (x == c1 or x == c2)]
         self.current_batch_scores = [x for x in self.current_batch_scores 
                                      if not (x[1][0] == c1 or x[1][1] == c1 
                                              or x[1][0] == c2 or x[1][1] == c2)]
@@ -214,7 +220,6 @@ class DocumentLevelClusters(object):
 
             score /= -np.log(paircount / self.num_docs)
 
-
             # jaccard similarity
             # s1 = self.index[c1]
             # s2 = self.index[c2]
@@ -230,18 +235,17 @@ class DocumentLevelClusters(object):
                or (score == best_score and np.random.randint(0, 2) == 1):
                 best_score = score
                 c1, c2 = tmp1, tmp2
+        print(best_score, file=sys.stderr)
         return c1, c2
 
-    def create_bitstrings(self):
-        for w in self.word_bitstrings:
-            # walk up the cluster hierarchy until there is no parent cluster
-            cur_cluster = w
-            bitstring = ""
-            while cur_cluster in self.cluster_parents:
-                bitstring = self.cluster_bits[cur_cluster] + bitstring
-                cur_cluster = self.cluster_parents[cur_cluster]
-
-            self.word_bitstrings[w] = bitstring
+    def get_bitstring(self, w):
+        # walk up the cluster hierarchy until there is no parent cluster
+        cur_cluster = w
+        bitstring = ""
+        while cur_cluster in self.cluster_parents:
+            bitstring = self.cluster_bits[cur_cluster] + bitstring
+            cur_cluster = self.cluster_parents[cur_cluster]
+        return bitstring
 
     def merge(self, c1, c2):
         self.cluster_parents[c1] = self.cluster_counter
@@ -251,8 +255,13 @@ class DocumentLevelClusters(object):
         self.cluster_bits[c2] = str(1 - r)
 
         self.index[self.cluster_counter] = self.index[c1] | self.index[c2]
-        del self.index[c1]
-        del self.index[c2]
+
+        # remove merged clusters from the index to save memory
+        # (but keep unmerged words)
+        if c1 not in self.words:
+            del self.index[c1]
+        if c2 not in self.words:
+            del self.index[c2]
 
     def create_index(self, doc_generator):
         for doc_id, doc in enumerate(doc_generator):
@@ -265,8 +274,9 @@ class DocumentLevelClusters(object):
 
     def save_clusters(self, output_path):
         with open(output_path, 'w') as f:
-            for w, bitstring in self.word_bitstrings.items():
-                print("{}\t{}".format(w, bitstring), file=f)
+            for w in self.words:
+                print("{}\t{}\t{}".format(w, self.get_bitstring(w),
+                                          len(self.index[w])), file=f)
 
 def main():
     parser = argparse.ArgumentParser(description='Create hierarchical word' +
