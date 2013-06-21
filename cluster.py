@@ -13,22 +13,18 @@ While this code creates hierarchical clusters, it does not use the HMM-like
 sequence model to do so (section 3).  Instead, it merges clusters similar to the
 technique described in section 4 of Brown et al. (1992), using pointwise mutual 
 information.  However, the formulation of PMI used here differs slightly. 
-Each word/cluster is associated with a list of documents that it appears in 
-(documents can be full texts, sentences, tweets, etc.).
-Also, we use normalized PMI, which ranges from -1 to 1
-(see, e.g., http://en.wikipedia.org/wiki/Pointwise_mutual_information).
+Instead of using a window, we compute PMI using the probability that
+two randomly selected clusters from the same document will be c1 and c2.
+Also, since the total number of cluster tokens and pairs are constant, 
+we just use counts instead of probabilities.
 Thus, the score for merging two clusters c1 and c2 is the following:
 
-  log [ p(c1 and c2 in document) / p(c1 in document) / p(c2 in document) ]
-    / -log [ p(c1 and c2 in document) ]
+log[count(two tokens in the same doc are in c1 in c2) / count(c1) / count(c2)]
 
-The probabilities are maximum likelihood estimates (e.g., number of documents
-with c1 divided by the total number of documents).
+* See http://www.cs.columbia.edu/~cs4705/lectures/brown.pdf for a nice 
+overview of Brown clustering.
 
-Also, see http://www.cs.columbia.edu/~cs4705/lectures/brown.pdf for a nice 
-overview.
-
-Another implementation of "Brown clustering":
+* Here is another implementation of Brown clustering:
 https://github.com/percyliang/brown-cluster
 
 Author: Michael Heilman
@@ -55,7 +51,7 @@ def document_generator(path):
         for line in f.readlines():
             yield [x for x in line.strip().split() if x]
 
-def test_doc_gen2():
+def test_doc_gen_reviews():
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
             # yield re.split(r'\s+', f.read().strip().lower())
@@ -91,18 +87,16 @@ class DocumentLevelClusters(object):
         self.cluster_parents = {}
         self.cluster_counter = 0
 
-        # word ID -> list of doc IDs
-        self.index = defaultdict(set)
+        # cluster_id -> {doc_id -> counts}
+        self.index = defaultdict(dict)
 
-        # the list of words (after filtering)
+        # the list of words in the vocabulary and their counts
         self.words = []
+        self.word_counts = defaultdict(int)
         
-        # the bit to add when walking up the hierarchy 
+        # the 0/1 bit to add when walking up the hierarchy 
         # from a word to the top-level cluster
         self.cluster_bits = {}
-
-        # cache of log counts for words/clusters
-        self.log_counts = {}
 
         # create sets of documents that each word appears in
         self.create_index(doc_generator)
@@ -112,21 +106,14 @@ class DocumentLevelClusters(object):
         # include up to max_vocab_size words (or fewer if there are ties).
         self.create_vocab()
 
-        # make a copy of the list of words
-        freq_words = list(self.words)
+        # make a copy of the list of words, as a queue for making new clusters
+        word_queue = list(self.words)
 
-        # score potential clusters for the most 
-        # frequent words.  Note that the count-based score is proportional to 
-        # the PMI since the probabilities are divided by a constant for the
-        # number of documents in the input.
-        self.current_batch = freq_words[:(self.batch_size + 1)]
+        # score potential clusters, starting with the most frequent words.
+        # also, remove the batch from the queue
+        self.current_batch = word_queue[:(self.batch_size + 1)]
         self.current_batch_scores = list(self.make_pair_scores(itertools.combinations(self.current_batch, 2)))
-
-        # store the initial words, to be used for the final clusters
-        self.initial_words = freq_words[:self.batch_size]
-
-        # remove the first batch_size elements
-        freq_words = freq_words[(self.batch_size + 1):]
+        word_queue = word_queue[(self.batch_size + 1):]
 
         while len(self.current_batch) > 1:
             # find the best pair of words/clusters to merge
@@ -137,32 +124,102 @@ class DocumentLevelClusters(object):
 
             # remove the merged clusters from the batch, add the new one
             # and the next most frequent word (if available)
-            self.update_batch(c1, c2, freq_words)
+            self.update_batch(c1, c2, word_queue)
 
             logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
                   .format(c1, c2, self.cluster_counter, 
-                          len(self.current_batch) + len(freq_words) - 1))
+                          len(self.current_batch) + len(word_queue) - 1))
+
             self.cluster_counter += 1
 
+    def create_index(self, doc_generator):
+        for doc_id, doc in enumerate(doc_generator):
+            for w in doc:
+                if doc_id not in self.index[w]:
+                    self.index[w][doc_id] = 0
+                self.index[w][doc_id] += 1
+                self.word_counts[w] += 1
+
+        # just add 1 to the last doc id (enumerate starts at zero)
+        self.num_docs = doc_id + 1
+        logging.info('{} documents were indexed.'.format(self.num_docs))
+
     def create_vocab(self):
-        self.words = sorted(self.index.keys(), 
-                            key=lambda w: len(self.index[w]), reverse=True)
+        self.words = sorted(self.word_counts.keys(), 
+                            key=lambda w: self.word_counts[w], reverse=True)
 
         if self.max_vocab_size is not None \
            and len(self.words) > self.max_vocab_size:
-            too_rare = len(self.index[self.words[self.max_vocab_size + 1]])
-            if too_rare == len(self.index[self.words[0]]):
+            too_rare = self.word_counts[self.words[self.max_vocab_size + 1]]
+            if too_rare == self.word_counts[self.words[0]]:
                 too_rare += 1
                 logging.info("max_vocab_size too low.  Using all words that" +
-                             " appeared in >= {} documents.".format(too_rare))
+                             " appeared >= {} times.".format(too_rare))
                 
             self.words = [w for w in self.words 
-                          if len(self.index[w]) > too_rare]
+                          if self.word_counts[w] > too_rare]
             words_set = set(self.words)
             index_keys = list(self.index.keys())
             for key in index_keys:
                 if key not in words_set:
                     del self.index[key]
+                    del self.word_counts[key]
+
+    def make_pair_scores(self, pair_iter):
+        for c1, c2 in pair_iter:
+            paircount = 0
+            for doc_id in (self.index[c1].keys() & self.index[c2].keys()):
+                paircount += self.index[c1][doc_id] * self.index[c2][doc_id]
+
+            if paircount == 0:
+                yield (float('-inf'), (c1, c2))  # log(0)
+                continue
+
+            score = np.log(paircount) \
+                    - np.log(self.word_counts[c1]) \
+                    - np.log(self.word_counts[c2])
+
+            yield (score, (c1, c2))
+
+    def find_best(self):
+        best_score, (c1, c2) = self.current_batch_scores[0]
+        for score, (tmp1, tmp2) in self.current_batch_scores:
+            # break ties randomly
+            if score > best_score \
+               or (score == best_score and np.random.randint(0, 2) == 1):
+                best_score = score
+                c1, c2 = tmp1, tmp2
+        return c1, c2
+
+    def merge(self, c1, c2):
+        c_new = self.cluster_counter
+
+        self.cluster_parents[c1] = c_new
+        self.cluster_parents[c2] = c_new
+        r = np.random.randint(0, 2)
+        self.cluster_bits[c1] = str(r)  # assign bits randomly
+        self.cluster_bits[c2] = str(1 - r)
+
+        # initialize the document counts of the new cluster with the counts
+        # for one of the two child clusters.  then, add the counts from the
+        # other child cluster
+        self.index[c_new] = self.index[c1]
+        for doc_id in self.index[c2]:
+            if doc_id not in self.index[c_new]:
+                self.index[c_new][doc_id] = 0
+            self.index[c_new][doc_id] += self.index[c2][doc_id]
+
+        # sum the frequencies of the child clusters
+        self.word_counts[c_new] = self.word_counts[c1] + self.word_counts[c2]
+
+        # remove merged clusters from the index to save memory
+        # (but keep frequencies for words for the final output)
+        del self.index[c1]
+        del self.index[c2]
+        if c1 not in self.words:
+            del self.word_counts[c1]
+        if c2 not in self.words:
+            del self.word_counts[c2]
 
     def update_batch(self, c1, c2, freq_words):
         # remove the clusters that were merged (and the scored pairs for them)
@@ -186,58 +243,6 @@ class DocumentLevelClusters(object):
         # (before adding new_items to current_batch) to avoid duplicates
         self.current_batch.extend(new_items)
 
-    def make_pair_scores(self, pair_iter):
-        for c1, c2 in pair_iter:
-            paircount = len(self.index[c1] & self.index[c2])
-
-            # PMI
-            # if paircount == 0:
-            #     yield (float('-inf'), (c1, c2))  # log(0)
-            #     continue
-
-            # if c1 not in self.log_counts:
-            #     self.log_counts[c1] = np.log(len(self.index[c1]))
-            # if c2 not in self.log_counts:
-            #     self.log_counts[c2] = np.log(len(self.index[c2]))
-
-            # score = np.log(paircount) \
-            #         - self.log_counts[c1] \
-            #         - self.log_counts[c2]
-
-            # normalized PMI
-            if paircount == 0:
-                yield (-1.0, (c1, c2))
-                continue
-
-            if c1 not in self.log_counts:
-                self.log_counts[c1] = np.log(len(self.index[c1]) / self.num_docs)
-            if c2 not in self.log_counts:
-                self.log_counts[c2] = np.log(len(self.index[c2]) / self.num_docs)
-
-            score = np.log(paircount / self.num_docs) \
-                    - self.log_counts[c1] \
-                    - self.log_counts[c2]
-
-            score /= -np.log(paircount / self.num_docs)
-
-            # jaccard similarity
-            # s1 = self.index[c1]
-            # s2 = self.index[c2]
-            # score = float(len(s1 & s2)) / len(s1 | s2)
-
-            yield (score, (c1, c2))
-
-    def find_best(self):
-        best_score, (c1, c2) = self.current_batch_scores[0]
-        for score, (tmp1, tmp2) in self.current_batch_scores:
-            # break ties randomly
-            if score > best_score \
-               or (score == best_score and np.random.randint(0, 2) == 1):
-                best_score = score
-                c1, c2 = tmp1, tmp2
-        print(best_score, file=sys.stderr)
-        return c1, c2
-
     def get_bitstring(self, w):
         # walk up the cluster hierarchy until there is no parent cluster
         cur_cluster = w
@@ -247,36 +252,11 @@ class DocumentLevelClusters(object):
             cur_cluster = self.cluster_parents[cur_cluster]
         return bitstring
 
-    def merge(self, c1, c2):
-        self.cluster_parents[c1] = self.cluster_counter
-        self.cluster_parents[c2] = self.cluster_counter
-        r = np.random.randint(0, 2)
-        self.cluster_bits[c1] = str(r)  # assign the bits randomly
-        self.cluster_bits[c2] = str(1 - r)
-
-        self.index[self.cluster_counter] = self.index[c1] | self.index[c2]
-
-        # remove merged clusters from the index to save memory
-        # (but keep unmerged words)
-        if c1 not in self.words:
-            del self.index[c1]
-        if c2 not in self.words:
-            del self.index[c2]
-
-    def create_index(self, doc_generator):
-        for doc_id, doc in enumerate(doc_generator):
-            for w in set(doc):
-                self.index[w].add(doc_id)
-
-        # just add 1 to the last doc id (enumerate starts at zero)
-        self.num_docs = doc_id + 1
-        logging.info('{} documents were indexed.'.format(self.num_docs))
-
     def save_clusters(self, output_path):
         with open(output_path, 'w') as f:
             for w in self.words:
                 print("{}\t{}\t{}".format(w, self.get_bitstring(w),
-                                          len(self.index[w])), file=f)
+                                          self.word_counts[w]), file=f)
 
 def main():
     parser = argparse.ArgumentParser(description='Create hierarchical word' +
