@@ -4,28 +4,33 @@
 A little module for creating hierarchical word clusters.
 This is based on the following paper.
 
-Peter F. Brown; Peter V. deSouza; Robert L. Mercer; T. J. Watson; Vincent J. 
-Della Pietra; Jenifer C. Lai. 1992.  Class-Based n-gram Models of Natural 
-Language.  Computational Linguistics, Volume 18, Number 4.  
+Peter F. Brown; Peter V. deSouza; Robert L. Mercer; T. J. Watson; Vincent J.
+Della Pietra; Jenifer C. Lai. 1992.  Class-Based n-gram Models of Natural
+Language.  Computational Linguistics, Volume 18, Number 4.
 http://acl.ldc.upenn.edu/J/J92/J92-4003.pdf
 
-While this code creates hierarchical clusters, it does not use the HMM-like 
+
+While this code creates hierarchical clusters, it does not use the HMM-like
 sequence model to do so (section 3).  Instead, it merges clusters similar to the
-technique described in section 4 of Brown et al. (1992), using pointwise mutual 
-information.  However, the formulation of PMI used here differs slightly. 
+technique described in section 4 of Brown et al. (1992), using pointwise mutual
+information.  However, the formulation of PMI used here differs slightly.
 Instead of using a window, we compute PMI using the probability that
 two randomly selected clusters from the same document will be c1 and c2.
-Also, since the total number of cluster tokens and pairs are constant, 
+Also, since the total number of cluster tokens and pairs are constant,
 we just use counts instead of probabilities.
 Thus, the score for merging two clusters c1 and c2 is the following:
 
 log[count(two tokens in the same doc are in c1 in c2) / count(c1) / count(c2)]
 
-* See http://www.cs.columbia.edu/~cs4705/lectures/brown.pdf for a nice 
-overview of Brown clustering.
+* See http://www.cs.columbia.edu/~cs4705/lectures/brown.pdf for a nice
+  overview of Brown clustering.
 
 * Here is another implementation of Brown clustering:
-https://github.com/percyliang/brown-cluster
+  https://github.com/percyliang/brown-cluster
+
+* Also, see Percy Liang's Master's Thesis:
+  Percy Liang. 2005.  Semi-supervised learning for natural language.  MIT.
+  http://cs.stanford.edu/~pliang/papers/meng-thesis.pdf
 
 Author: Michael Heilman
 
@@ -46,10 +51,15 @@ np.random.seed(1234567890)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
+
 def document_generator(path):
     with open(path) as f:
-        for line in f.readlines():
-            yield [x for x in line.strip().split() if x]
+        #for line in f.readlines():
+        #    yield [x for x in line.strip().split() if x]
+        paragraphs = [x for x in re.split(r'\n+', f.read()) if x]
+        for paragraph in paragraphs:
+            yield [x for x in re.split(r'\W+', paragraph.lower()) if x]
+
 
 def test_doc_gen_reviews():
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
@@ -60,20 +70,21 @@ def test_doc_gen_reviews():
             for line in f.readlines():
                 yield [x for x in re.split('\s+', line.strip().lower()) if x]
 
+
 def test_doc_gen():
     docs = ['dog cat bird bat whale monkey',
-    'monkey human ape',
-    'human man woman child',
-    'fish whale shark',
-    'man woman teacher lawyer doctor',
-    'fish shark',
-    'bird bat fly']
+            'monkey human ape',
+            'human man woman child',
+            'fish whale shark',
+            'man woman teacher lawyer doctor',
+            'fish shark',
+            'bird bat fly']
     return map(str.split, docs)
 
 
 class DocumentLevelClusters(object):
     '''
-    The initializer takes a document generator, which is simply an iterator 
+    The initializer takes a document generator, which is simply an iterator
     over lists of tokens.  You can define this however you wish.
     '''
     def __init__(self, doc_generator, batch_size=1000, max_vocab_size=None):
@@ -82,7 +93,7 @@ class DocumentLevelClusters(object):
 
         self.max_vocab_size = max_vocab_size
 
-        # mapping from cluster IDs to cluster IDs, 
+        # mapping from cluster IDs to cluster IDs,
         # to keep track of the hierarchy
         self.cluster_parents = {}
         self.cluster_counter = 0
@@ -93,16 +104,16 @@ class DocumentLevelClusters(object):
         # the list of words in the vocabulary and their counts
         self.words = []
         self.word_counts = defaultdict(int)
-        
-        # the 0/1 bit to add when walking up the hierarchy 
+
+        # the 0/1 bit to add when walking up the hierarchy
         # from a word to the top-level cluster
         self.cluster_bits = {}
 
         # create sets of documents that each word appears in
         self.create_index(doc_generator)
-        
+
         # find the most frequent words
-        # apply document count threshold.  
+        # apply document count threshold.
         # include up to max_vocab_size words (or fewer if there are ties).
         self.create_vocab()
 
@@ -127,8 +138,8 @@ class DocumentLevelClusters(object):
             self.update_batch(c1, c2, word_queue)
 
             logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
-                  .format(c1, c2, self.cluster_counter, 
-                          len(self.current_batch) + len(word_queue) - 1))
+                         .format(c1, c2, self.cluster_counter,
+                                 len(self.current_batch) + len(word_queue) - 1))
 
             self.cluster_counter += 1
 
@@ -145,7 +156,7 @@ class DocumentLevelClusters(object):
         logging.info('{} documents were indexed.'.format(self.num_docs))
 
     def create_vocab(self):
-        self.words = sorted(self.word_counts.keys(), 
+        self.words = sorted(self.word_counts.keys(),
                             key=lambda w: self.word_counts[w], reverse=True)
 
         if self.max_vocab_size is not None \
@@ -155,8 +166,8 @@ class DocumentLevelClusters(object):
                 too_rare += 1
                 logging.info("max_vocab_size too low.  Using all words that" +
                              " appeared >= {} times.".format(too_rare))
-                
-            self.words = [w for w in self.words 
+
+            self.words = [w for w in self.words
                           if self.word_counts[w] > too_rare]
             words_set = set(self.words)
             index_keys = list(self.index.keys())
@@ -225,10 +236,10 @@ class DocumentLevelClusters(object):
         # remove the clusters that were merged (and the scored pairs for them)
         self.current_batch = [x for x in self.current_batch
                               if not (x == c1 or x == c2)]
-        self.current_batch_scores = [x for x in self.current_batch_scores 
-                                     if not (x[1][0] == c1 or x[1][1] == c1 
+        self.current_batch_scores = [x for x in self.current_batch_scores
+                                     if not (x[1][0] == c1 or x[1][1] == c1
                                              or x[1][0] == c2 or x[1][1] == c2)]
-        
+
         # find what to add to the current batch
         new_items = [self.cluster_counter]
         if freq_words:
@@ -239,7 +250,7 @@ class DocumentLevelClusters(object):
         self.current_batch_scores.extend(self.make_pair_scores(itertools.product(new_items, self.current_batch)))
         self.current_batch_scores.extend(self.make_pair_scores(itertools.combinations(new_items, 2)))
 
-        # note: make the scores first with itertools.product 
+        # note: make the scores first with itertools.product
         # (before adding new_items to current_batch) to avoid duplicates
         self.current_batch.extend(new_items)
 
@@ -258,26 +269,28 @@ class DocumentLevelClusters(object):
                 print("{}\t{}\t{}".format(w, self.get_bitstring(w),
                                           self.word_counts[w]), file=f)
 
+
 def main():
     parser = argparse.ArgumentParser(description='Create hierarchical word' +
-        ' clusters from a corpus, following Brown et al. (1992).')
+                                     ' clusters from a corpus, following' +
+                                     ' Brown et al. (1992).')
     parser.add_argument('input_path', help='input file, one document per' +
-        ' line, with whitespace-separated tokens.')
+                        ' line, with whitespace-separated tokens.')
     parser.add_argument('output_path', help='output path')
     parser.add_argument('--max_vocab_size', help='maximum number of words in' +
                         ' the vocabulary (a smaller number will be used if' +
-                        ' there are ties at the specified level)', 
+                        ' there are ties at the specified level)',
                         default=None, type=int)
     parser.add_argument('--batch_size', help='number of clusters to merge at' +
                         ' one time (runtime is quadratic in this value)',
                         default=1000, type=int)
     args = parser.parse_args()
 
-    #doc_generator = document_generator(args.input_path)
-    doc_generator = test_doc_gen()
+    doc_generator = document_generator(args.input_path)
+    #doc_generator = test_doc_gen_reviews()
 
-    c = DocumentLevelClusters(doc_generator, 
-                              max_vocab_size=args.max_vocab_size, 
+    c = DocumentLevelClusters(doc_generator,
+                              max_vocab_size=args.max_vocab_size,
                               batch_size=args.batch_size)
     c.save_clusters(args.output_path)
 
