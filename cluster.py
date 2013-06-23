@@ -35,10 +35,10 @@ import itertools
 import logging
 from collections import defaultdict
 from time import gmtime, strftime
-import numpy as np
-from math import log
+import random
+from math import log, isnan, isinf
 
-np.random.seed(1234567890)
+random.seed(1234567890)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
@@ -270,11 +270,11 @@ class DocumentLevelClusters(object):
             for tmp2, score in self.L[tmp1].items():
                 # break ties randomly
                 if score > best_score \
-                   or (score == best_score and np.random.randint(0, 2) == 1):
+                   or (score == best_score and random.randint(0, 2) == 1):
                     best_score = score
                     c1, c2 = tmp1, tmp2
 
-        if not np.isfinite(best_score):
+        if isnan(best_score) or isinf(best_score):
             raise ValueError("bad value for score: {}".format(best_score))
 
         return c1, c2
@@ -292,7 +292,7 @@ class DocumentLevelClusters(object):
         # record parents
         self.cluster_parents[c1] = c_new
         self.cluster_parents[c2] = c_new
-        r = np.random.randint(0, 2)
+        r = random.randint(0, 2)
         self.cluster_bits[c1] = str(r)  # assign bits randomly
         self.cluster_bits[c2] = str(1 - r)
 
@@ -381,8 +381,8 @@ class DocumentLevelClusters(object):
     def save_clusters(self, output_path):
         with open(output_path, 'w') as f:
             for w in self.words:
-                print("{}\t{}\t{}".format(w, self.get_bitstring(w),
-                                          self.counts[w]), file=f)
+                f.write("{}\t{}\t{}\n".format(w, self.get_bitstring(w),
+                                          self.counts[w]))
 
 
 def main():
