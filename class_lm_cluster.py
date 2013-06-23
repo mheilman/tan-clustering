@@ -1,6 +1,11 @@
 #!/bin/env python3
 
 '''
+NOTE: I am not very confident that this particular class is working properly.
+      Although it seems to do reasonable things (at least in the first iterations),
+      I haven't tested it against the Percy Liang implementation to see
+      what the differences in output are.
+
 A little module for creating hierarchical word clusters.
 This is based on the following papers.
 
