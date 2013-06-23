@@ -65,11 +65,11 @@ def document_generator(path):
 def test_doc_gen_reviews():
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
-            # yield re.split(r'\s+', f.read().strip().lower())
-            sys.stderr.write('.')
-            sys.stderr.flush()
-            for line in f.readlines():
-                yield [x for x in re.split('\s+', line.strip().lower()) if x]
+            yield re.split(r'\s+', f.read().strip().lower())
+            # sys.stderr.write('.')
+            # sys.stderr.flush()
+            # for line in f.readlines():
+            #     yield [x for x in re.split('\s+', line.strip().lower()) if x]
 
 
 def test_doc_gen():
@@ -197,9 +197,9 @@ class DocumentLevelClusters(object):
     def find_best(self):
         best_score, (c1, c2) = self.current_batch_scores[0]
         for score, (tmp1, tmp2) in self.current_batch_scores:
-            # break ties randomly
+            # break ties randomly (randint takes inclusive args!)
             if score > best_score \
-               or (score == best_score and random.randint(0, 2) == 1):
+               or (score == best_score and random.randint(0, 1) == 1):
                 best_score = score
                 c1, c2 = tmp1, tmp2
         return c1, c2
@@ -209,7 +209,7 @@ class DocumentLevelClusters(object):
 
         self.cluster_parents[c1] = c_new
         self.cluster_parents[c2] = c_new
-        r = random.randint(0, 2)
+        r = random.randint(0, 1)
         self.cluster_bits[c1] = str(r)  # assign bits randomly
         self.cluster_bits[c2] = str(1 - r)
 
@@ -260,6 +260,7 @@ class DocumentLevelClusters(object):
         # walk up the cluster hierarchy until there is no parent cluster
         cur_cluster = w
         bitstring = ""
+        import pdb;pdb.set_trace()
         while cur_cluster in self.cluster_parents:
             bitstring = self.cluster_bits[cur_cluster] + bitstring
             cur_cluster = self.cluster_parents[cur_cluster]
@@ -270,6 +271,7 @@ class DocumentLevelClusters(object):
             for w in self.words:
                 f.write("{}\t{}\t{}\n".format(w, self.get_bitstring(w),
                                           self.word_counts[w]))
+
 
 
 def main():
@@ -288,8 +290,8 @@ def main():
                         default=1000, type=int)
     args = parser.parse_args()
 
-    doc_generator = document_generator(args.input_path)
-    #doc_generator = test_doc_gen_reviews()
+    #doc_generator = document_generator(args.input_path)
+    doc_generator = test_doc_gen_reviews()
 
     c = DocumentLevelClusters(doc_generator,
                               max_vocab_size=args.max_vocab_size,

@@ -269,9 +269,9 @@ class ClassLMClusters(object):
         c1, c2 = None, None
         for tmp1 in self.L:
             for tmp2, score in self.L[tmp1].items():
-                # break ties randomly
+                # break ties randomly (randint takes inclusive args!)
                 if score > best_score \
-                   or (score == best_score and random.randint(0, 2) == 1):
+                   or (score == best_score and random.randint(0, 1) == 1):
                     best_score = score
                     c1, c2 = tmp1, tmp2
 
@@ -293,7 +293,7 @@ class ClassLMClusters(object):
         # record parents
         self.cluster_parents[c1] = c_new
         self.cluster_parents[c2] = c_new
-        r = random.randint(0, 2)
+        r = random.randint(0, 1)
         self.cluster_bits[c1] = str(r)  # assign bits randomly
         self.cluster_bits[c2] = str(1 - r)
 
