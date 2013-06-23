@@ -61,10 +61,6 @@ def test_reviews():
     return corpus
 
 
-def make_int_defaultdict():
-    return defaultdict(int)
-
-
 def make_float_defaultdict():
     return defaultdict(float)
 
@@ -77,7 +73,6 @@ class DocumentLevelClusters(object):
     def __init__(self, corpus, batch_size=1000, max_vocab_size=None):
         self.oov_id = -1
         self.batch_size = batch_size
-        self.num_tokens = 0
 
         self.max_vocab_size = max_vocab_size
 
@@ -87,12 +82,16 @@ class DocumentLevelClusters(object):
         self.cluster_counter = 0
 
         # the list of words in the vocabulary and their counts
+        # (use floats for everything. seems to be faster)
         self.words = []
-        self.counts = defaultdict(int)
-        self.trans = defaultdict(make_int_defaultdict)
+        self.counts = defaultdict(float)
+        self.trans = defaultdict(make_float_defaultdict)
+        self.num_tokens = 0.0
 
-        self.L = defaultdict(make_float_defaultdict)
+        # the graph weights (w) and the effects of merging nodes (L)
+        # (see Liang's thesis)
         self.w = defaultdict(make_float_defaultdict)
+        self.L = defaultdict(make_float_defaultdict)
 
         # the 0/1 bit to add when walking up the hierarchy
         # from a word to the top-level cluster
@@ -136,10 +135,10 @@ class DocumentLevelClusters(object):
         self.num_tokens = 0
 
         for w1, w2 in zip(corpus, corpus[1:]):
-            self.trans[w1][w2] += 1
-            self.counts[w1] += 1
-            self.num_tokens += 1
-        self.counts[w2] += 1
+            self.trans[w1][w2] += 1.0
+            self.counts[w1] += 1.0
+            self.num_tokens += 1.0
+        self.counts[w2] += 1.0
         self.num_tokens = self.num_tokens
         # note that these are all ints, and they will be used
         # in division operations, which won't work in python 2
@@ -234,19 +233,17 @@ class DocumentLevelClusters(object):
         # add the weight of edges coming in to the potential
         # new cluster from other nodes
         for d in self.current_batch:
-            w_new_d = compute_weight(trans[c1][d] + trans[c2][d],
-                                     trans[d][c1] + trans[d][c2],
-                                     count_c1 + count_c2,
-                                     counts[d])
-            val += w_new_d
+            val += compute_weight(trans[c1][d] + trans[c2][d],
+                                  trans[d][c1] + trans[d][c2],
+                                  count_c1 + count_c2,
+                                  counts[d])
 
         # ... but don't include what will be part of the new cluster
         for d in (c1, c2):
-            w_new_d = compute_weight(trans[c1][d] + trans[c2][d],
-                                     trans[d][c1] + trans[d][c2],
-                                     count_c1 + count_c2,
-                                     counts[d])
-            val -= w_new_d
+            val -= compute_weight(trans[c1][d] + trans[c2][d],
+                                  trans[d][c1] + trans[d][c2],
+                                  count_c1 + count_c2,
+                                  counts[d])
 
         # add the weight of the edge from the potential new cluster
         # to itself
