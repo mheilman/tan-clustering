@@ -46,6 +46,7 @@ import logging
 from collections import defaultdict
 from time import gmtime, strftime
 import numpy as np
+from math import log
 
 np.random.seed(1234567890)
 
@@ -53,6 +54,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
 
 def document_generator(path):
+    #TODO
     with open(path) as f:
         #for line in f.readlines():
         #    yield [x for x in line.strip().split() if x]
@@ -61,25 +63,20 @@ def document_generator(path):
             yield [x for x in re.split(r'\W+', paragraph.lower()) if x]
 
 
-def test_doc_gen_reviews():
+def test_reviews():
+    corpus = []
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
-            # yield re.split(r'\s+', f.read().strip().lower())
-            sys.stderr.write('.')
-            sys.stderr.flush()
-            for line in f.readlines():
-                yield [x for x in re.split('\s+', line.strip().lower()) if x]
+            corpus += [x for x in re.split(r'\s+', f.read()) if x]
+    return corpus
 
 
-def test_doc_gen():
-    docs = ['dog cat bird bat whale monkey',
-            'monkey human ape',
-            'human man woman child',
-            'fish whale shark',
-            'man woman teacher lawyer doctor',
-            'fish shark',
-            'bird bat fly']
-    return map(str.split, docs)
+def make_int_defaultdict():
+    return defaultdict(int)
+
+
+def make_float_defaultdict():
+    return defaultdict(float)
 
 
 class DocumentLevelClusters(object):
@@ -87,7 +84,8 @@ class DocumentLevelClusters(object):
     The initializer takes a document generator, which is simply an iterator
     over lists of tokens.  You can define this however you wish.
     '''
-    def __init__(self, doc_generator, batch_size=1000, max_vocab_size=None):
+    def __init__(self, corpus, batch_size=1000, max_vocab_size=None):
+        self.oov_id = -1
         self.batch_size = batch_size
         self.num_docs = 0
 
@@ -98,19 +96,20 @@ class DocumentLevelClusters(object):
         self.cluster_parents = {}
         self.cluster_counter = 0
 
-        # cluster_id -> {doc_id -> counts}
-        self.index = defaultdict(dict)
-
         # the list of words in the vocabulary and their counts
         self.words = []
-        self.word_counts = defaultdict(int)
+        self.counts = defaultdict(int)
+        self.trans = defaultdict(make_int_defaultdict)
+
+        self.L = defaultdict(make_float_defaultdict)
+        self.w = defaultdict(make_float_defaultdict)
 
         # the 0/1 bit to add when walking up the hierarchy
         # from a word to the top-level cluster
         self.cluster_bits = {}
 
         # create sets of documents that each word appears in
-        self.create_index(doc_generator)
+        self.create_index(corpus)
 
         # find the most frequent words
         # apply document count threshold.
@@ -123,8 +122,8 @@ class DocumentLevelClusters(object):
         # score potential clusters, starting with the most frequent words.
         # also, remove the batch from the queue
         self.current_batch = word_queue[:(self.batch_size + 1)]
-        self.current_batch_scores = list(self.make_pair_scores(itertools.combinations(self.current_batch, 2)))
         word_queue = word_queue[(self.batch_size + 1):]
+        self.initialize_tables()
 
         while len(self.current_batch) > 1:
             # find the best pair of words/clusters to merge
@@ -133,9 +132,9 @@ class DocumentLevelClusters(object):
             # merge the clusters in the index
             self.merge(c1, c2)
 
-            # remove the merged clusters from the batch, add the new one
-            # and the next most frequent word (if available)
-            self.update_batch(c1, c2, word_queue)
+            if word_queue:
+                new_word = word_queue.pop(0)
+                self.add_to_batch(new_word)
 
             logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
                          .format(c1, c2, self.cluster_counter,
@@ -143,63 +142,133 @@ class DocumentLevelClusters(object):
 
             self.cluster_counter += 1
 
-    def create_index(self, doc_generator):
-        for doc_id, doc in enumerate(doc_generator):
-            for w in doc:
-                if doc_id not in self.index[w]:
-                    self.index[w][doc_id] = 0
-                self.index[w][doc_id] += 1
-                self.word_counts[w] += 1
+    def create_index(self, corpus):
+        self.num_tokens = 0
 
-        # just add 1 to the last doc id (enumerate starts at zero)
-        self.num_docs = doc_id + 1
-        logging.info('{} documents were indexed.'.format(self.num_docs))
+        for w1, w2 in zip(corpus, corpus[1:]):
+            self.trans[w1][w2] += 1
+            self.counts[w1] += 1
+            self.num_tokens += 1
+        self.counts[w2] += 1
+        self.num_tokens = self.num_tokens
+        # note that these are all ints, and they will be used
+        # in division operations, which won't work in python 2
+
+        logging.info('{} word tokens were processed.'.format(self.num_tokens))
 
     def create_vocab(self):
-        self.words = sorted(self.word_counts.keys(),
-                            key=lambda w: self.word_counts[w], reverse=True)
+        self.words = sorted(self.counts.keys(),
+                            key=lambda w: self.counts[w], reverse=True)
 
         if self.max_vocab_size is not None \
            and len(self.words) > self.max_vocab_size:
-            too_rare = self.word_counts[self.words[self.max_vocab_size + 1]]
-            if too_rare == self.word_counts[self.words[0]]:
+            too_rare = self.counts[self.words[self.max_vocab_size + 1]]
+            if too_rare == self.counts[self.words[0]]:
                 too_rare += 1
                 logging.info("max_vocab_size too low.  Using all words that" +
                              " appeared >= {} times.".format(too_rare))
 
+            oov_words = set([w for w in self.words
+                             if self.counts[w] <= too_rare])
             self.words = [w for w in self.words
-                          if self.word_counts[w] > too_rare]
-            words_set = set(self.words)
-            index_keys = list(self.index.keys())
-            for key in index_keys:
-                if key not in words_set:
-                    del self.index[key]
-                    del self.word_counts[key]
+                          if self.counts[w] > too_rare]
 
-    def make_pair_scores(self, pair_iter):
-        for c1, c2 in pair_iter:
-            paircount = 0
-            for doc_id in (self.index[c1].keys() & self.index[c2].keys()):
-                paircount += self.index[c1][doc_id] * self.index[c2][doc_id]
+            for w in oov_words:
+                # merge OOV counts
+                self.counts[self.oov_id] += self.counts[w]
+                del self.counts[w]
 
-            if paircount == 0:
-                yield (float('-inf'), (c1, c2))  # log(0)
-                continue
+                # merge oov words in the "from" part of the transitions
+                for w2, val in self.trans[w].items():
+                    self.trans[self.oov_id][w2] += val
+                del self.trans[w]
 
-            score = np.log(paircount) \
-                    - np.log(self.word_counts[c1]) \
-                    - np.log(self.word_counts[c2])
+            # merge oov words in the "to" part of the transitions
+            for w1 in self.trans:
+                for w2 in set(self.trans[w1].keys()) & oov_words:
+                    self.trans[w1][self.oov_id] += self.trans[w1][w2]
+                    del self.trans[w1][w2]
 
-            yield (score, (c1, c2))
+    def initialize_tables(self):
+        logging.info("initializing tables")
+
+        # edges between nodes
+        for c1, c2 in itertools.combinations(self.current_batch, 2):
+            w = self.compute_weight(self.trans[c1][c2],
+                                    self.trans[c2][c1],
+                                    self.counts[c1],
+                                    self.counts[c2])
+            if w:
+                self.w[c1][c2] = w
+
+        # edges to and from a single node
+        for c in self.current_batch:
+            w = self.compute_weight(self.trans[c][c],
+                                    None,
+                                    self.counts[c],
+                                    self.counts[c])
+            if w:
+                self.w[c][c] = w
+
+        num_pairs = 0
+        for c1, c2 in itertools.combinations(self.current_batch, 2):
+            self.compute_L(c1, c2)
+            num_pairs += 1
+            if num_pairs % 1000 == 0:
+                logging.info("{} pairs precomputed".format(num_pairs))
+
+    def compute_weight(self, c1c2, c2c1, c1, c2):
+        # equation 4.4 in Percy Liang's thesis
+        res = 0.0
+        n = self.num_tokens
+        for paircount in (c1c2, c2c1):
+            if paircount:
+                res += (paircount / n) * log(paircount * n / c1 / c2)
+        return res
+
+    def compute_L(self, c1, c2):
+        # add the weight of edges coming in to the potential
+        # new cluster from other nodes
+        for d in (d for d in self.current_batch if d != c1 and d != c2):
+            w_new_d = self.compute_weight(self.trans[c1][d] + self.trans[c2][d],
+                                          self.trans[d][c1] + self.trans[d][c2],
+                                          self.counts[c1] + self.counts[c2],
+                                          self.counts[d])
+            self.L[c1][c2] += w_new_d
+
+        # add the weight of the edge from the potential new cluster
+        # to itself
+        self.L[c1][c2] += self.compute_weight(self.trans[c1][c1]
+                                              + self.trans[c1][c2]
+                                              + self.trans[c2][c1]
+                                              + self.trans[c2][c2],
+                                              None,
+                                              self.counts[c1] + self.counts[c2],
+                                              self.counts[c1] + self.counts[c2])
+
+        # subtract the weight of edges to/from c1, c2
+        # (which would be removed)
+        for d in self.current_batch:
+            for c in (c1, c2):
+                if d in self.w[c]:
+                    self.L[c1][c2] -= self.w[c][d]
+                elif c in self.w[d]:
+                    self.L[c1][c2] -= self.w[d][c]
 
     def find_best(self):
-        best_score, (c1, c2) = self.current_batch_scores[0]
-        for score, (tmp1, tmp2) in self.current_batch_scores:
-            # break ties randomly
-            if score > best_score \
-               or (score == best_score and np.random.randint(0, 2) == 1):
-                best_score = score
-                c1, c2 = tmp1, tmp2
+        best_score = float('-inf')
+        c1, c2 = None, None
+        for tmp1 in self.L:
+            for tmp2, score in self.L[tmp1].items():
+                # break ties randomly
+                if score > best_score \
+                   or (score == best_score and np.random.randint(0, 2) == 1):
+                    best_score = score
+                    c1, c2 = tmp1, tmp2
+
+        if not np.isfinite(best_score):
+            raise ValueError("bad value for score: {}".format(best_score))
+
         return c1, c2
 
     def merge(self, c1, c2):
@@ -211,48 +280,77 @@ class DocumentLevelClusters(object):
         self.cluster_bits[c1] = str(r)  # assign bits randomly
         self.cluster_bits[c2] = str(1 - r)
 
-        # initialize the document counts of the new cluster with the counts
-        # for one of the two child clusters.  then, add the counts from the
-        # other child cluster
-        self.index[c_new] = self.index[c1]
-        for doc_id in self.index[c2]:
-            if doc_id not in self.index[c_new]:
-                self.index[c_new][doc_id] = 0
-            self.index[c_new][doc_id] += self.index[c2][doc_id]
+        # add the new cluster to the counts and transitions dictionaries
+        self.counts[c_new] = self.counts[c1] + self.counts[c2]
+        for c in [c1, c2]:
+            for d, val in self.trans[c].items():
+                if d == c1 or d == c2:
+                    d = c_new
+                self.trans[c_new][d] += val
 
-        # sum the frequencies of the child clusters
-        self.word_counts[c_new] = self.word_counts[c1] + self.word_counts[c2]
+        # update the score table
+        for d1 in self.L:
+            for d2 in self.L[d1]:
+                for c in (c1, c2):
+                    self.L[d1][d2] -= self.compute_weight(self.trans[d1][c] + self.trans[d2][c],
+                                                          self.trans[c][d1] + self.trans[c][d2],
+                                                          self.counts[d1] + self.counts[d2],
+                                                          self.counts[c])
+                self.L[d1][d2] += self.compute_weight(self.trans[d1][c_new] + self.trans[d2][c_new],
+                                                      self.trans[c_new][d1] + self.trans[c_new][d2],
+                                                      self.counts[d1] + self.counts[d2],
+                                                      self.counts[c_new])
 
-        # remove merged clusters from the index to save memory
-        # (but keep frequencies for words for the final output)
-        del self.index[c1]
-        del self.index[c2]
+        # remove merged clusters from the counts and transitions dictionaries
+        # to save memory (but keep frequencies for words for the final output)
         if c1 not in self.words:
-            del self.word_counts[c1]
+            del self.counts[c1]
         if c2 not in self.words:
-            del self.word_counts[c2]
+            del self.counts[c2]
 
-    def update_batch(self, c1, c2, freq_words):
-        # remove the clusters that were merged (and the scored pairs for them)
-        self.current_batch = [x for x in self.current_batch
-                              if not (x == c1 or x == c2)]
-        self.current_batch_scores = [x for x in self.current_batch_scores
-                                     if not (x[1][0] == c1 or x[1][1] == c1
-                                             or x[1][0] == c2 or x[1][1] == c2)]
+        del self.trans[c1]
+        del self.trans[c2]
+        for d in self.trans:
+            for c in [c1, c2]:
+                if c in self.trans[d]:
+                    del self.trans[d][c]
 
-        # find what to add to the current batch
-        new_items = [self.cluster_counter]
-        if freq_words:
-            new_word = freq_words.pop(0)
-            new_items.append(new_word)
+        # remove the old clusters from the w and L tables
+        for table in [self.w, self.L]:
+            for d in table:
+                if c1 in table[d]:
+                    del table[d][c1]
+                if c2 in table[d]:
+                    del table[d][c2]
+            if c1 in table:
+                del table[c1]
+            if c2 in table:
+                del table[c2]
 
-        # add to the batch and score the new cluster pairs that result
-        self.current_batch_scores.extend(self.make_pair_scores(itertools.product(new_items, self.current_batch)))
-        self.current_batch_scores.extend(self.make_pair_scores(itertools.combinations(new_items, 2)))
+        # remove the merged items
+        self.current_batch.remove(c1)
+        self.current_batch.remove(c2)
 
-        # note: make the scores first with itertools.product
-        # (before adding new_items to current_batch) to avoid duplicates
-        self.current_batch.extend(new_items)
+        # add the new cluster to the w and L tables
+        self.add_to_batch(c_new)
+
+    def add_to_batch(self, c_new):
+        for d in self.current_batch:
+            self.w[d][c_new] = self.compute_weight(self.trans[d][c_new],
+                                                   self.trans[c_new][d],
+                                                   self.counts[d],
+                                                   self.counts[c_new])
+        self.w[c_new][c_new] = self.compute_weight(self.trans[c_new][c_new],
+                                                   None,
+                                                   self.counts[c_new],
+                                                   self.counts[c_new])
+
+        # add the new cluster and then compute scores for merging it
+        # with all clusters in the current batch
+        for d in self.current_batch:
+            self.compute_L(d, c_new)
+
+        self.current_batch.append(c_new)
 
     def get_bitstring(self, w):
         # walk up the cluster hierarchy until there is no parent cluster
@@ -267,7 +365,7 @@ class DocumentLevelClusters(object):
         with open(output_path, 'w') as f:
             for w in self.words:
                 print("{}\t{}\t{}".format(w, self.get_bitstring(w),
-                                          self.word_counts[w]), file=f)
+                                          self.counts[w]), file=f)
 
 
 def main():
@@ -286,10 +384,11 @@ def main():
                         default=1000, type=int)
     args = parser.parse_args()
 
-    doc_generator = document_generator(args.input_path)
-    #doc_generator = test_doc_gen_reviews()
+    #corpus = document_generator(args.input_path)
+    corpus = test_reviews()
 
-    c = DocumentLevelClusters(doc_generator,
+    #corpus = "the dog ran . the cat walked . the man ran . the child walked . a child spoke . a man walked . a man spoke . a dog ran .".split()
+    c = DocumentLevelClusters(corpus,
                               max_vocab_size=args.max_vocab_size,
                               batch_size=args.batch_size)
     c.save_clusters(args.output_path)
