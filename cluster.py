@@ -2,35 +2,25 @@
 
 '''
 A little module for creating hierarchical word clusters.
-This is based on the following paper.
+This is based on the following papers.
 
-Peter F. Brown; Peter V. deSouza; Robert L. Mercer; T. J. Watson; Vincent J.
-Della Pietra; Jenifer C. Lai. 1992.  Class-Based n-gram Models of Natural
-Language.  Computational Linguistics, Volume 18, Number 4.
-http://acl.ldc.upenn.edu/J/J92/J92-4003.pdf
+* Peter F. Brown; Peter V. deSouza; Robert L. Mercer; T. J. Watson; Vincent J.
+  Della Pietra; Jenifer C. Lai. 1992.  Class-Based n-gram Models of Natural
+  Language.  Computational Linguistics, Volume 18, Number 4.
+  http://acl.ldc.upenn.edu/J/J92/J92-4003.pdf
+
+* Percy Liang. 2005.  Semi-supervised learning for natural language.  MIT.
+  http://cs.stanford.edu/~pliang/papers/meng-thesis.pdf
 
 
-While this code creates hierarchical clusters, it does not use the HMM-like
-sequence model to do so (section 3).  Instead, it merges clusters similar to the
-technique described in section 4 of Brown et al. (1992), using pointwise mutual
-information.  However, the formulation of PMI used here differs slightly.
-Instead of using a window, we compute PMI using the probability that
-two randomly selected clusters from the same document will be c1 and c2.
-Also, since the total number of cluster tokens and pairs are constant,
-we just use counts instead of probabilities.
-Thus, the score for merging two clusters c1 and c2 is the following:
+Some additional references:
 
-log[count(two tokens in the same doc are in c1 in c2) / count(c1) / count(c2)]
-
-* See http://www.cs.columbia.edu/~cs4705/lectures/brown.pdf for a nice
+* See http://www.cs.columbia.edu/~cs4705/lectures/brown.pdf for a high-level
   overview of Brown clustering.
 
 * Here is another implementation of Brown clustering:
   https://github.com/percyliang/brown-cluster
 
-* Also, see Percy Liang's Master's Thesis:
-  Percy Liang. 2005.  Semi-supervised learning for natural language.  MIT.
-  http://cs.stanford.edu/~pliang/papers/meng-thesis.pdf
 
 Author: Michael Heilman
 
@@ -87,7 +77,7 @@ class DocumentLevelClusters(object):
     def __init__(self, corpus, batch_size=1000, max_vocab_size=None):
         self.oov_id = -1
         self.batch_size = batch_size
-        self.num_docs = 0
+        self.num_tokens = 0
 
         self.max_vocab_size = max_vocab_size
 
@@ -217,43 +207,48 @@ class DocumentLevelClusters(object):
             if num_pairs % 1000 == 0:
                 logging.info("{} pairs precomputed".format(num_pairs))
 
-    def compute_weight(self, c1c2, c2c1, c1, c2):
+    def compute_weight(self, count_12, count_21, count_1, count_2):
         # equation 4.4 in Percy Liang's thesis
         res = 0.0
         n = self.num_tokens
-        for paircount in (c1c2, c2c1):
+        for paircount in (count_12, count_21):
             if paircount:
-                res += (paircount / n) * log(paircount * n / c1 / c2)
+                res += (paircount / n) * log(paircount * n / count_1 / count_2)
         return res
 
     def compute_L(self, c1, c2):
+        val = 0.0
+        count_c1 = self.counts[c1]
+        count_c2 = self.counts[c2]
+
         # add the weight of edges coming in to the potential
         # new cluster from other nodes
         for d in (d for d in self.current_batch if d != c1 and d != c2):
             w_new_d = self.compute_weight(self.trans[c1][d] + self.trans[c2][d],
                                           self.trans[d][c1] + self.trans[d][c2],
-                                          self.counts[c1] + self.counts[c2],
+                                          count_c1 + count_c2,
                                           self.counts[d])
-            self.L[c1][c2] += w_new_d
+            val += w_new_d
 
         # add the weight of the edge from the potential new cluster
         # to itself
-        self.L[c1][c2] += self.compute_weight(self.trans[c1][c1]
-                                              + self.trans[c1][c2]
-                                              + self.trans[c2][c1]
-                                              + self.trans[c2][c2],
-                                              None,
-                                              self.counts[c1] + self.counts[c2],
-                                              self.counts[c1] + self.counts[c2])
+        val += self.compute_weight(self.trans[c1][c1]
+                                   + self.trans[c1][c2]
+                                   + self.trans[c2][c1]
+                                   + self.trans[c2][c2],
+                                   None,
+                                   count_c1 + count_c2,
+                                   count_c1 + count_c2)
 
         # subtract the weight of edges to/from c1, c2
         # (which would be removed)
-        for d in self.current_batch:
-            for c in (c1, c2):
-                if d in self.w[c]:
-                    self.L[c1][c2] -= self.w[c][d]
-                elif c in self.w[d]:
-                    self.L[c1][c2] -= self.w[d][c]
+        for d, c in itertools.product(self.current_batch, (c1, c2)):
+            if d in self.w[c]:
+                val -= self.w[c][d]
+            elif c in self.w[d]:
+                val -= self.w[d][c]
+
+        self.L[c1][c2] = val
 
     def find_best(self):
         best_score = float('-inf')
@@ -282,7 +277,7 @@ class DocumentLevelClusters(object):
 
         # add the new cluster to the counts and transitions dictionaries
         self.counts[c_new] = self.counts[c1] + self.counts[c2]
-        for c in [c1, c2]:
+        for c in (c1, c2):
             for d, val in self.trans[c].items():
                 if d == c1 or d == c2:
                     d = c_new
@@ -316,7 +311,7 @@ class DocumentLevelClusters(object):
                     del self.trans[d][c]
 
         # remove the old clusters from the w and L tables
-        for table in [self.w, self.L]:
+        for table in (self.w, self.L):
             for d in table:
                 if c1 in table[d]:
                     del table[d][c1]
@@ -335,6 +330,7 @@ class DocumentLevelClusters(object):
         self.add_to_batch(c_new)
 
     def add_to_batch(self, c_new):
+        # compute weights for edges connected to the new node
         for d in self.current_batch:
             self.w[d][c_new] = self.compute_weight(self.trans[d][c_new],
                                                    self.trans[c_new][d],
