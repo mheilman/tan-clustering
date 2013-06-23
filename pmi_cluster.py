@@ -260,7 +260,6 @@ class DocumentLevelClusters(object):
         # walk up the cluster hierarchy until there is no parent cluster
         cur_cluster = w
         bitstring = ""
-        import pdb;pdb.set_trace()
         while cur_cluster in self.cluster_parents:
             bitstring = self.cluster_bits[cur_cluster] + bitstring
             cur_cluster = self.cluster_parents[cur_cluster]
