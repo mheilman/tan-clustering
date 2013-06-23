@@ -65,7 +65,7 @@ def make_float_defaultdict():
     return defaultdict(float)
 
 
-class DocumentLevelClusters(object):
+class ClassLMClusters(object):
     '''
     The initializer takes a document generator, which is simply an iterator
     over lists of tokens.  You can define this however you wish.
@@ -407,7 +407,7 @@ def main():
     corpus = test_reviews()
 
     #corpus = "the dog ran . the cat walked . the man ran . the child walked . a child spoke . a man walked . a man spoke . a dog ran .".split()
-    c = DocumentLevelClusters(corpus,
+    c = ClassLMClusters(corpus,
                               max_vocab_size=args.max_vocab_size,
                               batch_size=args.batch_size)
     c.save_clusters(args.output_path)
