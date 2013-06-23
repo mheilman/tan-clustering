@@ -181,22 +181,24 @@ class DocumentLevelClusters(object):
 
     def initialize_tables(self):
         logging.info("initializing tables")
+        trans = self.trans
+        counts = self.counts
 
         # edges between nodes
         for c1, c2 in itertools.combinations(self.current_batch, 2):
-            w = self.compute_weight(self.trans[c1][c2],
-                                    self.trans[c2][c1],
-                                    self.counts[c1],
-                                    self.counts[c2])
+            w = self.compute_weight(trans[c1][c2],
+                                    trans[c2][c1],
+                                    counts[c1],
+                                    counts[c2])
             if w:
                 self.w[c1][c2] = w
 
         # edges to and from a single node
         for c in self.current_batch:
-            w = self.compute_weight(self.trans[c][c],
+            w = self.compute_weight(trans[c][c],
                                     None,
-                                    self.counts[c],
-                                    self.counts[c])
+                                    counts[c],
+                                    counts[c])
             if w:
                 self.w[c][c] = w
 
@@ -218,35 +220,49 @@ class DocumentLevelClusters(object):
 
     def compute_L(self, c1, c2):
         val = 0.0
+
+        # avoid class member lookups
+        # (this seems to give a decent performance gain since these are
+        # called in loops over many items)
         count_c1 = self.counts[c1]
         count_c2 = self.counts[c2]
+        trans = self.trans
+        counts = self.counts
+        compute_weight = self.compute_weight
+        w = self.w
 
         # add the weight of edges coming in to the potential
         # new cluster from other nodes
-        for d in (d for d in self.current_batch if d != c1 and d != c2):
-            w_new_d = self.compute_weight(self.trans[c1][d] + self.trans[c2][d],
-                                          self.trans[d][c1] + self.trans[d][c2],
-                                          count_c1 + count_c2,
-                                          self.counts[d])
+        for d in self.current_batch:
+            w_new_d = compute_weight(trans[c1][d] + trans[c2][d],
+                                     trans[d][c1] + trans[d][c2],
+                                     count_c1 + count_c2,
+                                     counts[d])
             val += w_new_d
+
+        # ... but don't include what will be part of the new cluster
+        for d in (c1, c2):
+            w_new_d = compute_weight(trans[c1][d] + trans[c2][d],
+                                     trans[d][c1] + trans[d][c2],
+                                     count_c1 + count_c2,
+                                     counts[d])
+            val -= w_new_d
 
         # add the weight of the edge from the potential new cluster
         # to itself
-        val += self.compute_weight(self.trans[c1][c1]
-                                   + self.trans[c1][c2]
-                                   + self.trans[c2][c1]
-                                   + self.trans[c2][c2],
-                                   None,
-                                   count_c1 + count_c2,
-                                   count_c1 + count_c2)
+        val += compute_weight(trans[c1][c1] + trans[c1][c2]
+                              + trans[c2][c1] + trans[c2][c2],
+                              None,
+                              count_c1 + count_c2,
+                              count_c1 + count_c2)
 
         # subtract the weight of edges to/from c1, c2
         # (which would be removed)
         for d, c in itertools.product(self.current_batch, (c1, c2)):
-            if d in self.w[c]:
-                val -= self.w[c][d]
-            elif c in self.w[d]:
-                val -= self.w[d][c]
+            if d in w[c]:
+                val -= w[c][d]
+            elif c in w[d]:
+                val -= w[d][c]
 
         self.L[c1][c2] = val
 
@@ -269,6 +285,14 @@ class DocumentLevelClusters(object):
     def merge(self, c1, c2):
         c_new = self.cluster_counter
 
+        # avoid class member lookups (seems to help performance)
+        trans = self.trans
+        counts = self.counts
+        compute_weight = self.compute_weight
+        L = self.L
+        w = self.w
+
+        # record parents
         self.cluster_parents[c1] = c_new
         self.cluster_parents[c2] = c_new
         r = np.random.randint(0, 2)
@@ -276,42 +300,42 @@ class DocumentLevelClusters(object):
         self.cluster_bits[c2] = str(1 - r)
 
         # add the new cluster to the counts and transitions dictionaries
-        self.counts[c_new] = self.counts[c1] + self.counts[c2]
+        counts[c_new] = counts[c1] + counts[c2]
         for c in (c1, c2):
-            for d, val in self.trans[c].items():
+            for d, val in trans[c].items():
                 if d == c1 or d == c2:
                     d = c_new
-                self.trans[c_new][d] += val
+                trans[c_new][d] += val
 
         # update the score table
-        for d1 in self.L:
-            for d2 in self.L[d1]:
+        for d1 in L:
+            for d2 in L[d1]:
                 for c in (c1, c2):
-                    self.L[d1][d2] -= self.compute_weight(self.trans[d1][c] + self.trans[d2][c],
-                                                          self.trans[c][d1] + self.trans[c][d2],
-                                                          self.counts[d1] + self.counts[d2],
-                                                          self.counts[c])
-                self.L[d1][d2] += self.compute_weight(self.trans[d1][c_new] + self.trans[d2][c_new],
-                                                      self.trans[c_new][d1] + self.trans[c_new][d2],
-                                                      self.counts[d1] + self.counts[d2],
-                                                      self.counts[c_new])
+                    L[d1][d2] -= compute_weight(trans[d1][c] + trans[d2][c],
+                                                trans[c][d1] + trans[c][d2],
+                                                counts[d1] + counts[d2],
+                                                counts[c])
+                L[d1][d2] += compute_weight(trans[d1][c_new] + trans[d2][c_new],
+                                            trans[c_new][d1] + trans[c_new][d2],
+                                            counts[d1] + counts[d2],
+                                            counts[c_new])
 
         # remove merged clusters from the counts and transitions dictionaries
         # to save memory (but keep frequencies for words for the final output)
         if c1 not in self.words:
-            del self.counts[c1]
+            del counts[c1]
         if c2 not in self.words:
-            del self.counts[c2]
+            del counts[c2]
 
-        del self.trans[c1]
-        del self.trans[c2]
-        for d in self.trans:
+        del trans[c1]
+        del trans[c2]
+        for d in trans:
             for c in [c1, c2]:
-                if c in self.trans[d]:
-                    del self.trans[d][c]
+                if c in trans[d]:
+                    del trans[d][c]
 
         # remove the old clusters from the w and L tables
-        for table in (self.w, self.L):
+        for table in (w, L):
             for d in table:
                 if c1 in table[d]:
                     del table[d][c1]
