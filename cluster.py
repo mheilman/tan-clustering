@@ -232,6 +232,7 @@ class DocumentLevelClusters(object):
 
         # add the weight of edges coming in to the potential
         # new cluster from other nodes
+        # TODO this is slow
         for d in self.current_batch:
             val += compute_weight(trans[c1][d] + trans[c2][d],
                                   trans[d][c1] + trans[d][c2],
@@ -305,6 +306,7 @@ class DocumentLevelClusters(object):
                 trans[c_new][d] += val
 
         # update the score table
+        # TODO this is slow
         for d1 in L:
             for d2 in L[d1]:
                 for c in (c1, c2):
