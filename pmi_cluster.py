@@ -2,7 +2,7 @@
 
 '''
 A little module for creating hierarchical word clusters.
-This is based on the following paper.
+This is based loosely on the following paper.
 
 Peter F. Brown; Peter V. deSouza; Robert L. Mercer; T. J. Watson; Vincent J.
 Della Pietra; Jenifer C. Lai. 1992.  Class-Based n-gram Models of Natural
@@ -10,10 +10,10 @@ Language.  Computational Linguistics, Volume 18, Number 4.
 http://acl.ldc.upenn.edu/J/J92/J92-4003.pdf
 
 
-While this code creates hierarchical clusters, it does not use the HMM-like
-sequence model to do so (section 3).  Instead, it merges clusters simply by
-picking the pairs of clusters with the highest pointwise mutual information.
-Instead of using a window (e.g., as in Brown et al., section 4),
+While this code creates hierarchical clusters, it does not use an HMM-like
+sequence model to do so (Brown et al., 1992, section 3).  Instead, it merges
+clusters simply by picking the pairs of clusters with the highest pointwise
+mutual information. Instead of using a window (e.g., as in Brown et al., sec. 4),
 this code computed PMI using the probability that two randomly selected clusters
 from the same document will be c1 and c2.  Also, since the total numbers of
 cluster tokens and pairs are constant across pairs, this code use counts
