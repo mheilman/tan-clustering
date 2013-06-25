@@ -36,23 +36,22 @@ import argparse
 import glob
 import re
 import itertools
-import logging
 from collections import defaultdict
 from math import log, isnan, isinf
 
 random.seed(1234567890)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
 
-def document_generator(path):
-    #TODO
+def read_corpus(path):
+    corpus = ""
     with open(path) as f:
         #for line in f.readlines():
-        #    yield [x for x in line.strip().split() if x]
+        #    corpus += [x for x in line.strip().split() if x]
         paragraphs = [x for x in re.split(r'\n+', f.read()) if x]
         for paragraph in paragraphs:
-            yield [x for x in re.split(r'\W+', paragraph.lower()) if x]
+            corpus += [x for x in re.split(r'\W+', paragraph.lower()) if x]
+    return corpus
 
 
 def test_reviews():
@@ -73,7 +72,6 @@ class ClassLMClusters(object):
     over lists of tokens.  You can define this however you wish.
     '''
     def __init__(self, corpus, batch_size=1000, max_vocab_size=None):
-        self.oov_id = -1
         self.batch_size = batch_size
 
         self.max_vocab_size = max_vocab_size
@@ -85,7 +83,6 @@ class ClassLMClusters(object):
 
         # the list of words in the vocabulary and their counts
         # (use floats for everything. seems to be faster)
-        self.words = []
         self.counts = defaultdict(float)
         self.trans = defaultdict(make_float_defaultdict)
         self.num_tokens = 0.0
@@ -99,16 +96,18 @@ class ClassLMClusters(object):
         # from a word to the top-level cluster
         self.cluster_bits = {}
 
-        # create sets of documents that each word appears in
-        self.create_index(corpus)
-
         # find the most frequent words
         # apply document count threshold.
         # include up to max_vocab_size words (or fewer if there are ties).
-        self.create_vocab()
+        self.vocab = {}
+        self.reverse_vocab = []
+        self.create_vocab(corpus)
+
+        # create sets of documents that each word appears in
+        self.create_index(corpus)
 
         # make a copy of the list of words, as a queue for making new clusters
-        word_queue = list(self.words)
+        word_queue = list(range(len(self.vocab)))
 
         # score potential clusters, starting with the most frequent words.
         # also, remove the batch from the queue
@@ -128,57 +127,43 @@ class ClassLMClusters(object):
                 self.add_to_batch(new_word)
 
             logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
-                         .format(c1, c2, self.cluster_counter,
+                         .format(self.reverse_vocab[c1] if c1 < len(self.reverse_vocab) else c1,
+                                 self.reverse_vocab[c2] if c2 < len(self.reverse_vocab) else c2,
+                                 self.cluster_counter,
                                  len(self.current_batch) + len(word_queue) - 1))
 
             self.cluster_counter += 1
 
     def create_index(self, corpus):
-        self.num_tokens = 0
-
         for w1, w2 in zip(corpus, corpus[1:]):
-            self.trans[w1][w2] += 1.0
-            self.counts[w1] += 1.0
-            self.num_tokens += 1.0
-        self.counts[w2] += 1.0
-        self.num_tokens = self.num_tokens
-        # note that these are all ints, and they will be used
-        # in division operations, which won't work in python 2
+            if w1 in self.vocab and w2 in self.vocab:
+                self.trans[self.vocab[w1]][self.vocab[w2]] += 1.0
 
         logging.info('{} word tokens were processed.'.format(self.num_tokens))
 
-    def create_vocab(self):
-        self.words = sorted(self.counts.keys(),
-                            key=lambda w: self.counts[w], reverse=True)
+    def create_vocab(self, corpus):
+        tmp_counts = defaultdict(float)
+        for w in corpus:
+            tmp_counts[w] += 1.0
+            self.num_tokens += 1.0
 
+        words = sorted(tmp_counts.keys(), key=lambda w: tmp_counts[w], reverse=True)
+
+        too_rare = 0
         if self.max_vocab_size is not None \
-           and len(self.words) > self.max_vocab_size:
-            too_rare = self.counts[self.words[self.max_vocab_size + 1]]
-            if too_rare == self.counts[self.words[0]]:
-                too_rare += 1
+           and len(words) > self.max_vocab_size:
+            too_rare = tmp_counts[words[self.max_vocab_size + 1]]
+            if too_rare == tmp_counts[words[0]]:
+                too_rare += 1.0
                 logging.info("max_vocab_size too low.  Using all words that" +
                              " appeared >= {} times.".format(too_rare))
 
-            oov_words = set([w for w in self.words
-                             if self.counts[w] <= too_rare])
-            self.words = [w for w in self.words
-                          if self.counts[w] > too_rare]
+        for i, w in enumerate(w for w in words if tmp_counts[w] > too_rare):
+            self.vocab[w] = i
+            self.counts[self.vocab[w]] = tmp_counts[w]
 
-            for w in oov_words:
-                # merge OOV counts
-                self.counts[self.oov_id] += self.counts[w]
-                del self.counts[w]
-
-                # merge oov words in the "from" part of the transitions
-                for w2, val in self.trans[w].items():
-                    self.trans[self.oov_id][w2] += val
-                del self.trans[w]
-
-            # merge oov words in the "to" part of the transitions
-            for w1 in self.trans:
-                for w2 in set(self.trans[w1].keys()) & oov_words:
-                    self.trans[w1][self.oov_id] += self.trans[w1][w2]
-                    del self.trans[w1][w2]
+        self.reverse_vocab = sorted(self.vocab.keys(), key=lambda w: self.vocab[w])
+        self.cluster_counter = len(self.vocab)
 
     def initialize_tables(self):
         logging.info("initializing tables")
@@ -294,9 +279,9 @@ class ClassLMClusters(object):
 
         # remove merged clusters from the counts and transitions dictionaries
         # to save memory (but keep frequencies for words for the final output)
-        if c1 not in self.words:
+        if c1 >= len(self.vocab):
             del self.counts[c1]
-        if c2 not in self.words:
+        if c2 >= len(self.vocab):
             del self.counts[c2]
 
         del self.trans[c1]
@@ -348,7 +333,7 @@ class ClassLMClusters(object):
 
     def get_bitstring(self, w):
         # walk up the cluster hierarchy until there is no parent cluster
-        cur_cluster = w
+        cur_cluster = self.vocab[w]
         bitstring = ""
         while cur_cluster in self.cluster_parents:
             bitstring = self.cluster_bits[cur_cluster] + bitstring
@@ -357,9 +342,9 @@ class ClassLMClusters(object):
 
     def save_clusters(self, output_path):
         with open(output_path, 'w') as f:
-            for w in self.words:
+            for w in self.vocab:
                 f.write("{}\t{}\t{}\n".format(w, self.get_bitstring(w),
-                                              self.counts[w]))
+                                              self.counts[self.vocab[w]]))
 
 
 def main():
@@ -378,7 +363,7 @@ def main():
                         default=1000, type=int)
     args = parser.parse_args()
 
-    #corpus = document_generator(args.input_path)
+    #corpus = read_corpus(args.input_path)
     corpus = test_reviews()
 
     #corpus = "the dog ran . the cat walked . the man ran . the child walked . a child spoke . a man walked . a man spoke . a dog ran .".split()
