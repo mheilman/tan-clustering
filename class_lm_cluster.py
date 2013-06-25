@@ -1,15 +1,8 @@
 #!/bin/env python3
 
 '''
-NOTE: I am not very confident that this particular class is working properly.
-      Although it seems to do reasonable things (at least in the first iterations),
-      I haven't tested it against the Percy Liang implementation (link below) 
-      to see what the differences in output are.  Also, if you don't mind its
-      research-only license, the Liang C++ implementation may be preferable
-      since it is probably faster.
-
-A little module for creating hierarchical word clusters.
-This is based on the following papers.
+An implementation for creating hierarchical word clusters based on syntactic
+context ("Brown clusters").  This is based on the following papers.
 
 * Peter F. Brown; Peter V. deSouza; Robert L. Mercer; T. J. Watson; Vincent J.
   Della Pietra; Jenifer C. Lai. 1992.  Class-Based n-gram Models of Natural
@@ -28,6 +21,13 @@ Some additional references:
 * Here is another implementation of Brown clustering:
   https://github.com/percyliang/brown-cluster
 
+
+NOTE: I am not very confident that this particular class is working properly.
+      Although it seems to do reasonable things, I haven't tested it against
+      implementation from  Percy Liang (link below) to see what the differences
+      in output are.  Also, if you don't mind the research-only license of the
+      Liang C++ implementation, that may be preferable since it is probably
+      faster.
 
 Author: Michael Heilman (mheilman@ets.org, mheilman@cs.cmu.edu)
 
