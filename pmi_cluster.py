@@ -36,15 +36,12 @@ Author: Michael Heilman
 
 '''
 
-import random
-import sys
 import argparse
 import glob
 import re
 import itertools
 import logging
 from collections import defaultdict
-from time import gmtime, strftime
 import random
 
 random.seed(1234567890)
@@ -269,8 +266,7 @@ class DocumentLevelClusters(object):
         with open(output_path, 'w') as f:
             for w in self.words:
                 f.write("{}\t{}\t{}\n".format(w, self.get_bitstring(w),
-                                          self.word_counts[w]))
-
+                                              self.word_counts[w]))
 
 
 def main():
