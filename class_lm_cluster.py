@@ -3,8 +3,10 @@
 '''
 NOTE: I am not very confident that this particular class is working properly.
       Although it seems to do reasonable things (at least in the first iterations),
-      I haven't tested it against the Percy Liang implementation to see
-      what the differences in output are.
+      I haven't tested it against the Percy Liang implementation (link below) 
+      to see what the differences in output are.  Also, if you don't mind its
+      research-only license, the Liang C++ implementation may be preferable
+      since it is probably faster.
 
 A little module for creating hierarchical word clusters.
 This is based on the following papers.
@@ -27,7 +29,7 @@ Some additional references:
   https://github.com/percyliang/brown-cluster
 
 
-Author: Michael Heilman
+Author: Michael Heilman (mheilman@ets.org, mheilman@cs.cmu.edu)
 
 '''
 
@@ -48,11 +50,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 def read_corpus(path):
     corpus = ""
     with open(path) as f:
-        #for line in f.readlines():
-        #    corpus += [x for x in line.strip().split() if x]
-        paragraphs = [x for x in re.split(r'\n+', f.read()) if x]
-        for paragraph in paragraphs:
-            corpus += [x for x in re.split(r'\W+', paragraph.lower()) if x]
+        corpus = re.split(r'\s+', f.read())
     return corpus
 
 
@@ -149,7 +147,8 @@ class ClassLMClusters(object):
             tmp_counts[w] += 1.0
             self.num_tokens += 1.0
 
-        words = sorted(tmp_counts.keys(), key=lambda w: tmp_counts[w], reverse=True)
+        words = sorted(tmp_counts.keys(), key=lambda w: tmp_counts[w],
+                       reverse=True)
 
         too_rare = 0
         if self.max_vocab_size is not None \
@@ -164,7 +163,8 @@ class ClassLMClusters(object):
             self.vocab[w] = i
             self.counts[self.vocab[w]] = tmp_counts[w]
 
-        self.reverse_vocab = sorted(self.vocab.keys(), key=lambda w: self.vocab[w])
+        self.reverse_vocab = sorted(self.vocab.keys(),
+                                    key=lambda w: self.vocab[w])
         self.cluster_counter = len(self.vocab)
 
     def initialize_tables(self):
@@ -172,7 +172,8 @@ class ClassLMClusters(object):
 
         # edges between nodes
         for c1, c2 in itertools.combinations(self.current_batch, 2):
-            w = self.compute_weight((c1,), (c2,)) + self.compute_weight([c2], [c1])
+            w = self.compute_weight((c1,), (c2,)) \
+                + self.compute_weight([c2], [c1])
             if w:
                 self.w[c1][c2] = w
 
@@ -205,7 +206,8 @@ class ClassLMClusters(object):
         for n in nodes2:
             count_2 += self.counts[n]
 
-        return (paircount / self.num_tokens) * log(paircount * self.num_tokens / count_1 / count_2)
+        return (paircount / self.num_tokens) \
+               * log(paircount * self.num_tokens / count_1 / count_2)
 
     def compute_L(self, c1, c2):
         val = 0.0
@@ -353,8 +355,8 @@ def main():
     parser = argparse.ArgumentParser(description='Create hierarchical word' +
                                      ' clusters from a corpus, following' +
                                      ' Brown et al. (1992).')
-    parser.add_argument('input_path', help='input file, one document per' +
-                        ' line, with whitespace-separated tokens.')
+    parser.add_argument('input_path', help='input file, ' +
+                                           'with tokens whitespace separated')
     parser.add_argument('output_path', help='output path')
     parser.add_argument('--max_vocab_size', help='maximum number of words in' +
                         ' the vocabulary (a smaller number will be used if' +
@@ -365,8 +367,8 @@ def main():
                         default=1000, type=int)
     args = parser.parse_args()
 
-    #corpus = read_corpus(args.input_path)
-    corpus = test_reviews()
+    corpus = read_corpus(args.input_path)
+    #corpus = test_reviews()
 
     #corpus = "the dog ran . the cat walked . the man ran . the child walked . a child spoke . a man walked . a man spoke . a dog ran .".split()
     c = ClassLMClusters(corpus,

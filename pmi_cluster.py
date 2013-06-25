@@ -11,14 +11,14 @@ http://acl.ldc.upenn.edu/J/J92/J92-4003.pdf
 
 
 While this code creates hierarchical clusters, it does not use the HMM-like
-sequence model to do so (section 3).  Instead, it merges clusters similar to the
-technique described in section 4 of Brown et al. (1992), using pointwise mutual
-information.  However, the formulation of PMI used here differs slightly.
-Instead of using a window, we compute PMI using the probability that
-two randomly selected clusters from the same document will be c1 and c2.
-Also, since the total number of cluster tokens and pairs are constant,
-we just use counts instead of probabilities.
-Thus, the score for merging two clusters c1 and c2 is the following:
+sequence model to do so (section 3).  Instead, it merges clusters simply by
+picking the pairs of clusters with the highest pointwise mutual information.
+Instead of using a window (e.g., as in Brown et al., section 4),
+this code computed PMI using the probability that two randomly selected clusters
+from the same document will be c1 and c2.  Also, since the total numbers of
+cluster tokens and pairs are constant across pairs, this code use counts
+instead of probabilities. Thus, the score for merging two clusters
+c1 and c2 is the following:
 
 log[count(two tokens in the same doc are in c1 in c2) / count(c1) / count(c2)]
 
@@ -32,7 +32,7 @@ log[count(two tokens in the same doc are in c1 in c2) / count(c1) / count(c2)]
   Percy Liang. 2005.  Semi-supervised learning for natural language.  MIT.
   http://cs.stanford.edu/~pliang/papers/meng-thesis.pdf
 
-Author: Michael Heilman
+Author: Michael Heilman (mheilman@ets.org, mheilman@cs.cmu.edu)
 
 '''
 
@@ -51,22 +51,30 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
 
 def document_generator(path):
+    '''
+    Default document reader.  Takes a path to a file with one document per line,
+    with tokens separate by whitespace, and yields lists of tokens per document.
+    This could be replaced by any function that yields lists of tokens.
+    See main() for how it is called.
+    '''
     with open(path) as f:
-        #for line in f.readlines():
-        #    yield [x for x in line.strip().split() if x]
-        paragraphs = [x for x in re.split(r'\n+', f.read()) if x]
-        for paragraph in paragraphs:
-            yield [x for x in re.split(r'\W+', paragraph.lower()) if x]
+        for line in f.readlines():
+            yield [x for x in line.strip().split() if x]
+        # paragraphs = [x for x in re.split(r'\n+', f.read()) if x]
+        # for paragraph in paragraphs:
+        #     yield [x for x in re.split(r'\W+', paragraph.lower()) if x]
 
 
 def test_doc_gen_reviews():
+    # debugging code for use with polarity dataset v2.0 from
+    # http://www.cs.cornell.edu/people/pabo/movie-review-data/
     for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
         with open(path) as f:
-            yield re.split(r'\s+', f.read().strip().lower())
-            # sys.stderr.write('.')
-            # sys.stderr.flush()
-            # for line in f.readlines():
-            #     yield [x for x in re.split('\s+', line.strip().lower()) if x]
+            #yield re.split(r'\s+', f.read().strip().lower())
+            sys.stderr.write('.')
+            sys.stderr.flush()
+            for line in f.readlines():
+                yield [x for x in re.split('\s+', line.strip().lower()) if x]
 
 
 def test_doc_gen():
@@ -82,6 +90,7 @@ def test_doc_gen():
 
 class DocumentLevelClusters(object):
     '''
+    Class for generating word clusters based on document-level co-occurence.
     The initializer takes a document generator, which is simply an iterator
     over lists of tokens.  You can define this however you wish.
     '''
@@ -178,13 +187,16 @@ class DocumentLevelClusters(object):
         for c1, c2 in pair_iter:
             paircount = 0
             # call set() on the keys for compatibility with python 2.7 and pypy
-            for doc_id in (set(self.index[c1].keys()) & set(self.index[c2].keys())):
+            for doc_id in (set(self.index[c1].keys())
+                           & set(self.index[c2].keys())):
                 paircount += self.index[c1][doc_id] * self.index[c2][doc_id]
 
             if paircount == 0:
                 yield (float('-inf'), (c1, c2))  # log(0)
                 continue
 
+            # note that these counts are ints!
+            # (but the log function returns floats)
             score = log(paircount) \
                     - log(self.word_counts[c1]) \
                     - log(self.word_counts[c2])
@@ -285,8 +297,8 @@ def main():
                         default=1000, type=int)
     args = parser.parse_args()
 
-    #doc_generator = document_generator(args.input_path)
-    doc_generator = test_doc_gen_reviews()
+    doc_generator = document_generator(args.input_path)
+    #doc_generator = test_doc_gen_reviews()
 
     c = DocumentLevelClusters(doc_generator,
                               max_vocab_size=args.max_vocab_size,
