@@ -36,11 +36,13 @@ import argparse
 import glob
 import re
 import itertools
+import logging
 from collections import defaultdict
 from math import log, isnan, isinf
 
 random.seed(1234567890)
 
+logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
 
 def read_corpus(path):
