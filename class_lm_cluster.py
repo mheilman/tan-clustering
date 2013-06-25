@@ -185,24 +185,16 @@ class ClassLMClusters(object):
 
     def initialize_tables(self):
         logging.info("initializing tables")
-        trans = self.trans
-        counts = self.counts
 
         # edges between nodes
         for c1, c2 in itertools.combinations(self.current_batch, 2):
-            w = self.compute_weight(trans[c1][c2],
-                                    trans[c2][c1],
-                                    counts[c1],
-                                    counts[c2])
+            w = self.compute_weight((c1,), (c2,)) + self.compute_weight((c2,), (c1,))
             if w:
                 self.w[c1][c2] = w
 
         # edges to and from a single node
         for c in self.current_batch:
-            w = self.compute_weight(trans[c][c],
-                                    None,
-                                    counts[c],
-                                    counts[c])
+            w = self.compute_weight((c,), (c,))
             if w:
                 self.w[c][c] = w
 
@@ -213,13 +205,20 @@ class ClassLMClusters(object):
             if num_pairs % 1000 == 0:
                 logging.info("{} pairs precomputed".format(num_pairs))
 
-    def compute_weight(self, count_12, count_21, count_1, count_2):
-        # equation 4.4 in Percy Liang's thesis
+    def compute_weight(self, nodes1, nodes2):
         res = 0.0
-        n = self.num_tokens
-        for paircount in (count_12, count_21):
-            if paircount:
-                res += (paircount / n) * log(paircount * n / count_1 / count_2)
+        count_1 = 0.0
+        count_2 = 0.0
+        paircount = 0.0
+
+        for n1, n2 in itertools.product(nodes1, nodes2):
+            paircount += self.trans[n1][n2]
+        for n in nodes1:
+            count_1 += self.counts[n]
+        for n in nodes2:
+            count_2 += self.counts[n]
+        if paircount:
+            res += (paircount / self.num_tokens) * log(paircount * self.num_tokens / count_1 / count_2)
         return res
 
     def compute_L(self, c1, c2):
@@ -230,42 +229,30 @@ class ClassLMClusters(object):
         # called in loops over many items)
         count_c1 = self.counts[c1]
         count_c2 = self.counts[c2]
-        trans = self.trans
-        counts = self.counts
-        compute_weight = self.compute_weight
-        w = self.w
 
         # add the weight of edges coming in to the potential
         # new cluster from other nodes
         # TODO this is slow
         for d in self.current_batch:
-            val += compute_weight(trans[c1][d] + trans[c2][d],
-                                  trans[d][c1] + trans[d][c2],
-                                  count_c1 + count_c2,
-                                  counts[d])
+            val += self.compute_weight((c1, c2), (d,))
+            val += self.compute_weight((d,), (c1, c2))
 
         # ... but don't include what will be part of the new cluster
         for d in (c1, c2):
-            val -= compute_weight(trans[c1][d] + trans[c2][d],
-                                  trans[d][c1] + trans[d][c2],
-                                  count_c1 + count_c2,
-                                  counts[d])
+            val -= self.compute_weight((c1, c2), (d,))
+            val -= self.compute_weight((d,), (c1, c2))
 
         # add the weight of the edge from the potential new cluster
         # to itself
-        val += compute_weight(trans[c1][c1] + trans[c1][c2]
-                              + trans[c2][c1] + trans[c2][c2],
-                              None,
-                              count_c1 + count_c2,
-                              count_c1 + count_c2)
+        val += self.compute_weight((c1, c2), (c1, c2))
 
         # subtract the weight of edges to/from c1, c2
         # (which would be removed)
         for d, c in itertools.product(self.current_batch, (c1, c2)):
-            if d in w[c]:
-                val -= w[c][d]
-            elif c in w[d]:
-                val -= w[d][c]
+            if d in self.w[c]:
+                val -= self.w[c][d]
+            elif c in self.w[d]:
+                val -= self.w[d][c]
 
         self.L[c1][c2] = val
 
@@ -288,13 +275,6 @@ class ClassLMClusters(object):
     def merge(self, c1, c2):
         c_new = self.cluster_counter
 
-        # avoid class member lookups (seems to help performance)
-        trans = self.trans
-        counts = self.counts
-        compute_weight = self.compute_weight
-        L = self.L
-        w = self.w
-
         # record parents
         self.cluster_parents[c1] = c_new
         self.cluster_parents[c2] = c_new
@@ -303,43 +283,37 @@ class ClassLMClusters(object):
         self.cluster_bits[c2] = str(1 - r)
 
         # add the new cluster to the counts and transitions dictionaries
-        counts[c_new] = counts[c1] + counts[c2]
+        self.counts[c_new] = self.counts[c1] + self.counts[c2]
         for c in (c1, c2):
-            for d, val in trans[c].items():
+            for d, val in self.trans[c].items():
                 if d == c1 or d == c2:
                     d = c_new
-                trans[c_new][d] += val
+                self.trans[c_new][d] += val
 
-        # update the score table
+        # subtract the weights for the merged nodes from the score table
         # TODO this is slow
-        for d1 in L:
-            for d2 in L[d1]:
-                for c in (c1, c2):
-                    L[d1][d2] -= compute_weight(trans[d1][c] + trans[d2][c],
-                                                trans[c][d1] + trans[c][d2],
-                                                counts[d1] + counts[d2],
-                                                counts[c])
-                L[d1][d2] += compute_weight(trans[d1][c_new] + trans[d2][c_new],
-                                            trans[c_new][d1] + trans[c_new][d2],
-                                            counts[d1] + counts[d2],
-                                            counts[c_new])
+        for c in (c1, c2):
+            for d1 in self.L:
+                for d2 in self.L[d1]:
+                    self.L[d1][d2] -= self.compute_weight((d1, d2), (c,))
+                    self.L[d1][d2] -= self.compute_weight((c,), (d1, d2))
 
         # remove merged clusters from the counts and transitions dictionaries
         # to save memory (but keep frequencies for words for the final output)
         if c1 not in self.words:
-            del counts[c1]
+            del self.counts[c1]
         if c2 not in self.words:
-            del counts[c2]
+            del self.counts[c2]
 
-        del trans[c1]
-        del trans[c2]
-        for d in trans:
+        del self.trans[c1]
+        del self.trans[c2]
+        for d in self.trans:
             for c in [c1, c2]:
-                if c in trans[d]:
-                    del trans[d][c]
+                if c in self.trans[d]:
+                    del self.trans[d][c]
 
         # remove the old clusters from the w and L tables
-        for table in (w, L):
+        for table in (self.w, self.L):
             for d in table:
                 if c1 in table[d]:
                     del table[d][c1]
@@ -360,20 +334,22 @@ class ClassLMClusters(object):
     def add_to_batch(self, c_new):
         # compute weights for edges connected to the new node
         for d in self.current_batch:
-            self.w[d][c_new] = self.compute_weight(self.trans[d][c_new],
-                                                   self.trans[c_new][d],
-                                                   self.counts[d],
-                                                   self.counts[c_new])
-        self.w[c_new][c_new] = self.compute_weight(self.trans[c_new][c_new],
-                                                   None,
-                                                   self.counts[c_new],
-                                                   self.counts[c_new])
+            self.w[d][c_new] = self.compute_weight((d,), (c_new,))
+            self.w[d][c_new] = self.compute_weight((c_new,), (d,))
+        self.w[c_new][c_new] = self.compute_weight((c_new,), (c_new,))
 
-        # add the new cluster and then compute scores for merging it
-        # with all clusters in the current batch
+        # add the weights from this new node to the merge score table
+        # TODO this is slow
+        for d1 in self.L:
+            for d2 in self.L[d1]:
+                self.L[d1][d2] += self.compute_weight((d1, d2), (c_new,))
+                self.L[d1][d2] += self.compute_weight((c_new,), (d1, d2))
+
+        # compute scores for merging it with all clusters in the current batch
         for d in self.current_batch:
             self.compute_L(d, c_new)
 
+        # now add it to the batch
         self.current_batch.append(c_new)
 
     def get_bitstring(self, w):
