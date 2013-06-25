@@ -88,6 +88,10 @@ def test_doc_gen():
     return map(str.split, docs)
 
 
+def make_float_defaultdict():
+    return defaultdict(float)
+
+
 class DocumentLevelClusters(object):
     '''
     Class for generating word clusters based on document-level co-occurence.
@@ -130,9 +134,9 @@ class DocumentLevelClusters(object):
         # score potential clusters, starting with the most frequent words.
         # also, remove the batch from the queue
         self.current_batch = word_queue[:(self.batch_size + 1)]
-        self.current_batch_scores = list(self.make_pair_scores(itertools.combinations(self.current_batch, 2)))
+        self.current_batch_scores = defaultdict(make_float_defaultdict)
+        self.make_pair_scores(itertools.combinations(self.current_batch, 2))
         word_queue = word_queue[(self.batch_size + 1):]
-
         while len(self.current_batch) > 1:
             # find the best pair of words/clusters to merge
             c1, c2 = self.find_best()
@@ -192,7 +196,7 @@ class DocumentLevelClusters(object):
                 paircount += self.index[c1][doc_id] * self.index[c2][doc_id]
 
             if paircount == 0:
-                yield (float('-inf'), (c1, c2))  # log(0)
+                self.current_batch_scores[c1][c2] = float('-inf')  # log(0)
                 continue
 
             # note that these counts are ints!
@@ -201,16 +205,17 @@ class DocumentLevelClusters(object):
                     - log(self.word_counts[c1]) \
                     - log(self.word_counts[c2])
 
-            yield (score, (c1, c2))
+            self.current_batch_scores[c1][c2] = score
 
     def find_best(self):
-        best_score, (c1, c2) = self.current_batch_scores[0]
-        for score, (tmp1, tmp2) in self.current_batch_scores:
-            # break ties randomly (randint takes inclusive args!)
-            if score > best_score \
-               or (score == best_score and random.randint(0, 1) == 1):
-                best_score = score
-                c1, c2 = tmp1, tmp2
+        c1, c2, best_score = None, None, None
+        for tmp1, d in self.current_batch_scores.items():
+            for tmp2, score in d.items():
+                # break ties randomly (randint takes inclusive args!)
+                if best_score is None or score > best_score \
+                   or (score == best_score and random.randint(0, 1) == 1):
+                    best_score = score
+                    c1, c2 = tmp1, tmp2
         return c1, c2
 
     def merge(self, c1, c2):
@@ -247,9 +252,13 @@ class DocumentLevelClusters(object):
         # remove the clusters that were merged (and the scored pairs for them)
         self.current_batch = [x for x in self.current_batch
                               if not (x == c1 or x == c2)]
-        self.current_batch_scores = [x for x in self.current_batch_scores
-                                     if not (x[1][0] == c1 or x[1][1] == c1
-                                             or x[1][0] == c2 or x[1][1] == c2)]
+
+        for c in [c1, c2]:
+            if c in self.current_batch_scores:
+                del self.current_batch_scores[c]
+            for d in self.current_batch_scores.values():
+                if c in d:
+                    del d[c]
 
         # find what to add to the current batch
         new_items = [self.cluster_counter]
@@ -258,8 +267,8 @@ class DocumentLevelClusters(object):
             new_items.append(new_word)
 
         # add to the batch and score the new cluster pairs that result
-        self.current_batch_scores.extend(self.make_pair_scores(itertools.product(new_items, self.current_batch)))
-        self.current_batch_scores.extend(self.make_pair_scores(itertools.combinations(new_items, 2)))
+        self.make_pair_scores(itertools.product(new_items, self.current_batch))
+        self.make_pair_scores(itertools.combinations(new_items, 2))
 
         # note: make the scores first with itertools.product
         # (before adding new_items to current_batch) to avoid duplicates
