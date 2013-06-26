@@ -62,9 +62,6 @@ def document_generator(path):
             line = line.strip()
             if line:
                 yield re.split(r'\s+', line)
-        # paragraphs = [x for x in re.split(r'\n+', f.read()) if x]
-        # for paragraph in paragraphs:
-        #     yield [x for x in re.split(r'\W+', paragraph.lower()) if x]
 
 
 def test_doc_gen():
