@@ -58,6 +58,10 @@ def make_float_defaultdict():
     return defaultdict(float)
 
 
+def make_int_defaultdict():
+    return defaultdict(int)
+
+
 class ClassLMClusters(object):
     '''
     The initializer takes a document generator, which is simply an iterator
@@ -74,10 +78,9 @@ class ClassLMClusters(object):
         self.cluster_counter = 0
 
         # the list of words in the vocabulary and their counts
-        # (use floats for everything. seems to be faster)
-        self.counts = defaultdict(float)
-        self.trans = defaultdict(make_float_defaultdict)
-        self.num_tokens = 0.0
+        self.counts = defaultdict(int)
+        self.trans = defaultdict(make_int_defaultdict)
+        self.num_tokens = 0
 
         # the graph weights (w) and the effects of merging nodes (L)
         # (see Liang's thesis)
@@ -129,15 +132,15 @@ class ClassLMClusters(object):
     def create_index(self, corpus):
         for w1, w2 in zip(corpus, corpus[1:]):
             if w1 in self.vocab and w2 in self.vocab:
-                self.trans[self.vocab[w1]][self.vocab[w2]] += 1.0
+                self.trans[self.vocab[w1]][self.vocab[w2]] += 1
 
         logging.info('{} word tokens were processed.'.format(self.num_tokens))
 
     def create_vocab(self, corpus):
-        tmp_counts = defaultdict(float)
+        tmp_counts = defaultdict(int)
         for w in corpus:
-            tmp_counts[w] += 1.0
-            self.num_tokens += 1.0
+            tmp_counts[w] += 1
+            self.num_tokens += 1
 
         words = sorted(tmp_counts.keys(), key=lambda w: tmp_counts[w],
                        reverse=True)
@@ -147,7 +150,7 @@ class ClassLMClusters(object):
            and len(words) > self.max_vocab_size:
             too_rare = tmp_counts[words[self.max_vocab_size + 1]]
             if too_rare == tmp_counts[words[0]]:
-                too_rare += 1.0
+                too_rare += 1
                 logging.info("max_vocab_size too low.  Using all words that" +
                              " appeared >= {} times.".format(too_rare))
 
@@ -183,23 +186,29 @@ class ClassLMClusters(object):
                 logging.info("{} pairs precomputed".format(num_pairs))
 
     def compute_weight(self, nodes1, nodes2):
-        paircount = 0.0
+        paircount = 0
         for n1 in nodes1:
             for n2 in nodes2:
                 paircount += self.trans[n1][n2]
 
         if not paircount:
-            return 0.0
+            return 0
 
-        count_1 = 0.0
-        count_2 = 0.0
+        count_1 = 0
+        count_2 = 0
         for n in nodes1:
             count_1 += self.counts[n]
         for n in nodes2:
             count_2 += self.counts[n]
 
-        return (paircount / self.num_tokens) \
-               * log(paircount * self.num_tokens / count_1 / count_2)
+        # convert to floats
+        num_tokens = float(self.num_tokens)
+        paircount = float(paircount)
+        count_1 = float(count_1)
+        count_2 = float(count_2)
+
+        return (paircount / num_tokens) \
+               * log(paircount * num_tokens / count_1 / count_2)
 
     def compute_L(self, c1, c2):
         val = 0.0
@@ -341,7 +350,7 @@ class ClassLMClusters(object):
             for w in self.vocab:
                 # convert the counts back to ints when printing
                 f.write("{}\t{}\t{}\n".format(w, self.get_bitstring(w),
-                                              int(round(self.counts[self.vocab[w]]))))
+                                              self.counts[self.vocab[w]]))
 
 
 def main():
