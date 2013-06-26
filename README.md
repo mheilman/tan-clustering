@@ -7,15 +7,20 @@ Author: Michael Heilman (mheilman@ets.org, mheilman@cs.cmu.edu)
 
 See the docstrings in the scripts for further information.
 
+I developed the code for Python 3.2.3, but it seems to work fine with Python 2.7 and pypy 2.0.
+
 Usage Example
 -------------
 
-   python pmi\_cluster.py example\_input.txt example\_output.txt
-
-Compatibility
--------------
-
-I developed the code for Python 3.2.3, but it seems to work fine with Python 2.7 and pypy 2.0.
+```
+   python pmi_cluster.py example_input.txt example_output.txt
+```
+   
+And then (optionally) sort by the bitstrings for easier browsing...
+   
+```
+   sort -k 2 example_output.txt > example_output_sorted.txt
+```
 
 License
 -------
