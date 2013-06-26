@@ -1,4 +1,4 @@
-this is one document . it has two sentences .
+this is one document . it has two sentences but the program only cares about spaces .
 here is another document . it also has two sentences .
 and here is a third document with one sentence .
 this document is short .
