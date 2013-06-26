@@ -1,0 +1,7 @@
+this is one document . it has two sentences .
+here is another document . it also has two sentences .
+and here is a third document with one sentence .
+this document is short .
+the dog ran in the park .
+the cat was chased by the dog .
+the dog chased the cat .
