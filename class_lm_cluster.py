@@ -50,7 +50,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 def read_corpus(path):
     corpus = ""
     with open(path) as f:
-        corpus = re.split(r'\s+', f.read())
+        corpus = [x for x in re.split(r'\s+', f.read()) if x]
     return corpus
 
 
