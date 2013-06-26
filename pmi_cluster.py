@@ -59,22 +59,12 @@ def document_generator(path):
     '''
     with open(path) as f:
         for line in f.readlines():
-            yield [x for x in line.strip().split() if x]
+            line = line.strip()
+            if line:
+                yield re.split(r'\s+', line)
         # paragraphs = [x for x in re.split(r'\n+', f.read()) if x]
         # for paragraph in paragraphs:
         #     yield [x for x in re.split(r'\W+', paragraph.lower()) if x]
-
-
-def test_doc_gen_reviews():
-    # debugging code for use with polarity dataset v2.0 from
-    # http://www.cs.cornell.edu/people/pabo/movie-review-data/
-    for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
-        with open(path) as f:
-            #yield re.split(r'\s+', f.read().strip().lower())
-            sys.stderr.write('.')
-            sys.stderr.flush()
-            for line in f.readlines():
-                yield [x for x in re.split('\s+', line.strip().lower()) if x]
 
 
 def test_doc_gen():
@@ -307,7 +297,6 @@ def main():
     args = parser.parse_args()
 
     doc_generator = document_generator(args.input_path)
-    #doc_generator = test_doc_gen_reviews()
 
     c = DocumentLevelClusters(doc_generator,
                               max_vocab_size=args.max_vocab_size,

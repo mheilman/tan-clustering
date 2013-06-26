@@ -50,15 +50,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 def read_corpus(path):
     corpus = ""
     with open(path) as f:
-        corpus = [x for x in re.split(r'\s+', f.read()) if x]
-    return corpus
-
-
-def test_reviews():
-    corpus = []
-    for path in glob.glob('review_polarity/txt_sentoken/*/cv*'):
-        with open(path) as f:
-            corpus += [x for x in re.split(r'\s+', f.read()) if x]
+        corpus = re.split(r'\s+', f.read().strip())
     return corpus
 
 
@@ -347,8 +339,9 @@ class ClassLMClusters(object):
     def save_clusters(self, output_path):
         with open(output_path, 'w') as f:
             for w in self.vocab:
+                # convert the counts back to ints when printing
                 f.write("{}\t{}\t{}\n".format(w, self.get_bitstring(w),
-                                              self.counts[self.vocab[w]]))
+                                              int(round(self.counts[self.vocab[w]]))))
 
 
 def main():
@@ -368,9 +361,7 @@ def main():
     args = parser.parse_args()
 
     corpus = read_corpus(args.input_path)
-    #corpus = test_reviews()
 
-    #corpus = "the dog ran . the cat walked . the man ran . the child walked . a child spoke . a man walked . a man spoke . a dog ran .".split()
     c = ClassLMClusters(corpus,
                         max_vocab_size=args.max_vocab_size,
                         batch_size=args.batch_size)
