@@ -153,15 +153,16 @@ class DocumentLevelClusters(object):
             self.cluster_counter += 1
 
     def create_index(self, doc_generator):
-        for doc_id, doc in enumerate(doc_generator):
+        doc_id = 0
+        for doc in doc_generator:
             for w in doc:
                 if doc_id not in self.index[w]:
                     self.index[w][doc_id] = 0
                 self.index[w][doc_id] += 1
                 self.word_counts[w] += 1
+            doc_id += 1
 
-        # just add 1 to the last doc id (enumerate starts at zero)
-        self.num_docs = doc_id + 1
+        self.num_docs = doc_id
         logging.info('{} documents were indexed.'.format(self.num_docs))
 
     def create_vocab(self):
