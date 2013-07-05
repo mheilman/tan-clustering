@@ -46,6 +46,7 @@ import random
 
 random.seed(1234567890)
 from math import log
+from bs4 import UnicodeDammit
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
@@ -56,10 +57,12 @@ def document_generator(path, lower=False):
     with tokens separate by whitespace, and yields lists of tokens per document.
     This could be replaced by any function that yields lists of tokens.
     See main() for how it is called.
+
+    Note: this uses BeautifulSoup's UnicodeDammit to convert to unicode.
     '''
-    with open(path) as f:
-        for line in f.readlines():
-            line = line.strip()
+    with open(path, 'rb') as f:
+        for line in f:
+            line = UnicodeDammit(line.strip()).unicode_markup
             if lower:
                 line = line.lower()
             if line:
