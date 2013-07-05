@@ -63,8 +63,8 @@ def document_generator(path, lower=False):
     with open(path, 'rb') as f:
         i = 0
         for line in f:
+            line = UnicodeDammit(line.strip()).unicode_markup
             if line:
-                line = UnicodeDammit(line.strip()).unicode_markup
                 if lower:
                     line = line.lower()
                 i += 1
