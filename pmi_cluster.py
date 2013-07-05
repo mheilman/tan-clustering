@@ -50,7 +50,7 @@ from math import log
 logging.basicConfig(level=logging.INFO, format='%(asctime)s\t%(message)s')
 
 
-def document_generator(path):
+def document_generator(path, lower=False):
     '''
     Default document reader.  Takes a path to a file with one document per line,
     with tokens separate by whitespace, and yields lists of tokens per document.
@@ -60,6 +60,8 @@ def document_generator(path):
     with open(path) as f:
         for line in f.readlines():
             line = line.strip()
+            if lower:
+                line = line.lower()
             if line:
                 yield re.split(r'\s+', line)
 
@@ -85,11 +87,13 @@ class DocumentLevelClusters(object):
     The initializer takes a document generator, which is simply an iterator
     over lists of tokens.  You can define this however you wish.
     '''
-    def __init__(self, doc_generator, batch_size=1000, max_vocab_size=None):
+    def __init__(self, doc_generator, batch_size=1000, max_vocab_size=None,
+                 min_word_count=1):
         self.batch_size = batch_size
         self.num_docs = 0
 
         self.max_vocab_size = max_vocab_size
+        self.min_word_count = min_word_count
 
         # mapping from cluster IDs to cluster IDs,
         # to keep track of the hierarchy
@@ -157,22 +161,34 @@ class DocumentLevelClusters(object):
         self.words = sorted(self.word_counts.keys(),
                             key=lambda w: self.word_counts[w], reverse=True)
 
-        if self.max_vocab_size is not None \
-           and len(self.words) > self.max_vocab_size:
-            too_rare = self.word_counts[self.words[self.max_vocab_size + 1]]
-            if too_rare == self.word_counts[self.words[0]]:
-                too_rare += 1
-                logging.info("max_vocab_size too low.  Using all words that" +
-                             " appeared >= {} times.".format(too_rare))
+        too_rare = self.min_word_count - 1
+        if self.min_word_count > 1 and self.max_vocab_size is not None:
+            logging.info("max_vocab_size and min_word_count both set." +
+                         "  Ignoring min_word_count.".format(too_rare))
+        
+        if self.max_vocab_size is not None:
+            if len(self.words) <= self.max_vocab_size:
+                too_rare = 0
+            else:
+                too_rare = self.word_counts[self.words[self.max_vocab_size]]
+                if too_rare == self.word_counts[self.words[0]]:
+                    too_rare += 1
+                    logging.info("max_vocab_size too low.  Using all words"+ 
+                                 "that appeared > {} times.".format(too_rare))
 
-            self.words = [w for w in self.words
-                          if self.word_counts[w] > too_rare]
-            words_set = set(self.words)
-            index_keys = list(self.index.keys())
-            for key in index_keys:
-                if key not in words_set:
-                    del self.index[key]
-                    del self.word_counts[key]
+        # only keep words that occur more frequently than too_rare
+        self.words = [w for w in self.words
+                      if self.word_counts[w] > too_rare]
+
+        logging.info("Keeping the {} words that occurred at least {} times."
+                     .format(len(self.words), too_rare + 1))
+
+        words_set = set(self.words)
+        index_keys = list(self.index.keys())
+        for key in index_keys:
+            if key not in words_set:
+                del self.index[key]
+                del self.word_counts[key]
 
     def make_pair_scores(self, pair_iter):
         for c1, c2 in pair_iter:
@@ -288,16 +304,22 @@ def main():
                         ' the vocabulary (a smaller number will be used if' +
                         ' there are ties at the specified level)',
                         default=None, type=int)
+    parser.add_argument('--min_word_count', help='minimum word count to' +
+                        'include a word in the vocabulary. (default: 1)',
+                        default=1, type=int)
     parser.add_argument('--batch_size', help='number of clusters to merge at' +
                         ' one time (runtime is quadratic in this value)',
                         default=1000, type=int)
+    parser.add_argument('--lower', help='lowercase the input',
+                        action='store_true')
     args = parser.parse_args()
 
-    doc_generator = document_generator(args.input_path)
+    doc_generator = document_generator(args.input_path, lower=args.lower)
 
     c = DocumentLevelClusters(doc_generator,
                               max_vocab_size=args.max_vocab_size,
-                              batch_size=args.batch_size)
+                              batch_size=args.batch_size,
+                              min_word_count=args.min_word_count)
     c.save_clusters(args.output_path)
 
 

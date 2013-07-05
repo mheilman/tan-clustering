@@ -148,11 +148,11 @@ class ClassLMClusters(object):
         too_rare = 0
         if self.max_vocab_size is not None \
            and len(words) > self.max_vocab_size:
-            too_rare = tmp_counts[words[self.max_vocab_size + 1]]
+            too_rare = tmp_counts[words[self.max_vocab_size]]
             if too_rare == tmp_counts[words[0]]:
                 too_rare += 1
                 logging.info("max_vocab_size too low.  Using all words that" +
-                             " appeared >= {} times.".format(too_rare))
+                             " appeared > {} times.".format(too_rare))
 
         for i, w in enumerate(w for w in words if tmp_counts[w] > too_rare):
             self.vocab[w] = i
