@@ -61,11 +61,15 @@ def document_generator(path, lower=False):
     Note: this uses BeautifulSoup's UnicodeDammit to convert to unicode.
     '''
     with open(path, 'rb') as f:
+        i = 0
         for line in f:
-            line = UnicodeDammit(line.strip()).unicode_markup
-            if lower:
-                line = line.lower()
             if line:
+                line = UnicodeDammit(line.strip()).unicode_markup
+                if lower:
+                    line = line.lower()
+                i += 1
+                if i % 100000 == 0:
+                    logging.info('Read {} nonblank lines'.format(i))
                 yield re.split(r'\s+', line)
 
 
