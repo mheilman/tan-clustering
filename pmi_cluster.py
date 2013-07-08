@@ -188,9 +188,6 @@ class DocumentLevelClusters(object):
         self.words = [w for w in self.words
                       if self.word_counts[w] > too_rare]
 
-        logging.info("Keeping the {} words that occurred at least {} times."
-                     .format(len(self.words), too_rare + 1))
-
         words_set = set(self.words)
         index_keys = list(self.index.keys())
         for key in index_keys:
@@ -198,12 +195,16 @@ class DocumentLevelClusters(object):
                 del self.index[key]
                 del self.word_counts[key]
 
+        logging.info("Kept the {} words that occurred at least {} times."
+                     .format(len(self.words), too_rare + 1))
+
     def make_pair_scores(self, pair_iter):
         for c1, c2 in pair_iter:
             paircount = 0
-            # call set() on the keys for compatibility with python 2.7 and pypy
-            for doc_id in (set(self.index[c1].keys())
-                           & set(self.index[c2].keys())):
+
+            for doc_id in self.index[c1]:
+                if doc_id not in self.index[c2]:
+                    continue
                 paircount += self.index[c1][doc_id] * self.index[c2][doc_id]
 
             if paircount == 0:
