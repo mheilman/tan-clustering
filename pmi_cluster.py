@@ -88,19 +88,57 @@ def make_float_defaultdict():
     return defaultdict(float)
 
 
+def make_word_counts(document_generator, max_vocab_size=None, min_word_count=1):
+    res = defaultdict(int)
+
+    for doc in document_generator:
+        for tok in doc:
+            res[tok] += 1
+
+    too_rare = min_word_count - 1
+    if min_word_count > 1 and max_vocab_size is not None:
+        logging.info("max_vocab_size and min_word_count both set." +
+                     "  Ignoring min_word_count.".format(too_rare))
+
+    words = sorted(res.keys(), key=lambda w: res[w], reverse=True)
+
+    if max_vocab_size is not None:
+        if len(words) <= max_vocab_size:
+            too_rare = 0
+        else:
+            too_rare = res[words[max_vocab_size]]
+            if too_rare == res[words[0]]:
+                too_rare += 1
+                logging.info("max_vocab_size too low.  Using all words" +
+                             "that appeared > {} times.".format(too_rare))
+
+    # only keep words that occur more frequently than too_rare
+    words = [w for w in words if res[w] > too_rare]
+
+    logging.info("Created vocabulary with the {} words that occurred at least {} times."
+                 .format(len(words), too_rare + 1))
+
+    words_set = set(words)
+    wc_keys = list(res.keys())
+    for key in wc_keys:
+        if key not in words_set:
+            del res[key]
+
+    return res
+
+
 class DocumentLevelClusters(object):
     '''
     Class for generating word clusters based on document-level co-occurence.
     The initializer takes a document generator, which is simply an iterator
     over lists of tokens.  You can define this however you wish.
+
+    word_counts should be a dictionary of int counts that determines which words
+    to consider.
     '''
-    def __init__(self, doc_generator, batch_size=1000, max_vocab_size=None,
-                 min_word_count=1):
+    def __init__(self, doc_generator, word_counts, batch_size=1000):
         self.batch_size = batch_size
         self.num_docs = 0
-
-        self.max_vocab_size = max_vocab_size
-        self.min_word_count = min_word_count
 
         # mapping from cluster IDs to cluster IDs,
         # to keep track of the hierarchy
@@ -111,8 +149,14 @@ class DocumentLevelClusters(object):
         self.index = defaultdict(dict)
 
         # the list of words in the vocabulary and their counts
-        self.words = []
-        self.word_counts = defaultdict(int)
+        self.word_counts = word_counts
+
+        # find the most frequent words
+        self.words = sorted(self.word_counts.keys(),
+                            key=lambda w: self.word_counts[w], reverse=True)
+
+        # make a copy of the list of words, as a queue for making new clusters
+        word_queue = list(self.words)
 
         # the 0/1 bit to add when walking up the hierarchy
         # from a word to the top-level cluster
@@ -120,14 +164,6 @@ class DocumentLevelClusters(object):
 
         # create sets of documents that each word appears in
         self.create_index(doc_generator)
-
-        # find the most frequent words
-        # apply document count threshold.
-        # include up to max_vocab_size words (or fewer if there are ties).
-        self.create_vocab()
-
-        # make a copy of the list of words, as a queue for making new clusters
-        word_queue = list(self.words)
 
         # score potential clusters, starting with the most frequent words.
         # also, remove the batch from the queue
@@ -156,47 +192,15 @@ class DocumentLevelClusters(object):
         doc_id = 0
         for doc in doc_generator:
             for w in doc:
+                if w not in self.word_counts:
+                    continue
                 if doc_id not in self.index[w]:
                     self.index[w][doc_id] = 0
                 self.index[w][doc_id] += 1
-                self.word_counts[w] += 1
             doc_id += 1
 
         self.num_docs = doc_id
         logging.info('{} documents were indexed.'.format(self.num_docs))
-
-    def create_vocab(self):
-        self.words = sorted(self.word_counts.keys(),
-                            key=lambda w: self.word_counts[w], reverse=True)
-
-        too_rare = self.min_word_count - 1
-        if self.min_word_count > 1 and self.max_vocab_size is not None:
-            logging.info("max_vocab_size and min_word_count both set." +
-                         "  Ignoring min_word_count.".format(too_rare))
-        
-        if self.max_vocab_size is not None:
-            if len(self.words) <= self.max_vocab_size:
-                too_rare = 0
-            else:
-                too_rare = self.word_counts[self.words[self.max_vocab_size]]
-                if too_rare == self.word_counts[self.words[0]]:
-                    too_rare += 1
-                    logging.info("max_vocab_size too low.  Using all words"+ 
-                                 "that appeared > {} times.".format(too_rare))
-
-        # only keep words that occur more frequently than too_rare
-        self.words = [w for w in self.words
-                      if self.word_counts[w] > too_rare]
-
-        words_set = set(self.words)
-        index_keys = list(self.index.keys())
-        for key in index_keys:
-            if key not in words_set:
-                del self.index[key]
-                del self.word_counts[key]
-
-        logging.info("Kept the {} words that occurred at least {} times."
-                     .format(len(self.words), too_rare + 1))
 
     def make_pair_scores(self, pair_iter):
         for c1, c2 in pair_iter:
@@ -323,12 +327,12 @@ def main():
                         action='store_true')
     args = parser.parse_args()
 
-    doc_generator = document_generator(args.input_path, lower=args.lower)
+    word_counts = make_word_counts(document_generator(args.input_path, lower=args.lower),
+                                   max_vocab_size=args.max_vocab_size,
+                                   min_word_count=args.min_word_count)
 
-    c = DocumentLevelClusters(doc_generator,
-                              max_vocab_size=args.max_vocab_size,
-                              batch_size=args.batch_size,
-                              min_word_count=args.min_word_count)
+    c = DocumentLevelClusters(document_generator(args.input_path, lower=args.lower),
+                              word_counts, batch_size=args.batch_size)
     c.save_clusters(args.output_path)
 
 
