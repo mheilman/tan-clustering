@@ -206,10 +206,14 @@ class DocumentLevelClusters(object):
         for c1, c2 in pair_iter:
             paircount = 0
 
-            for doc_id in self.index[c1]:
-                if doc_id not in self.index[c2]:
+            index1, index2 = self.index[c1], self.index[c2]
+            if len(index1) > len(index2):
+                index1, index2 = index2, index1
+
+            for doc_id in index1:
+                if doc_id not in index2:
                     continue
-                paircount += self.index[c1][doc_id] * self.index[c2][doc_id]
+                paircount += index1[doc_id] * index2[doc_id]
 
             if paircount == 0:
                 self.current_batch_scores[c1][c2] = float('-inf')  # log(0)
