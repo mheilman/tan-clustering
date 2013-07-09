@@ -189,7 +189,7 @@ class ClassLMClusters(object):
 
         # edges between nodes
         for c1, c2 in itertools.combinations(self.current_batch, 2):
-            w = self.compute_weight((c1,), (c2,)) \
+            w = self.compute_weight([c1], [c2]) \
                 + self.compute_weight([c2], [c1])
             if w:
                 self.w[c1][c2] = w
