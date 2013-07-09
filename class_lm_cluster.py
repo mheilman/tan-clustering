@@ -41,6 +41,7 @@ import itertools
 import logging
 from collections import defaultdict
 from math import log, isnan, isinf
+from bs4 import UnicodeDammit
 
 random.seed(1234567890)
 
@@ -67,8 +68,12 @@ class ClassLMClusters(object):
     The initializer takes a document generator, which is simply an iterator
     over lists of tokens.  You can define this however you wish.
     '''
-    def __init__(self, corpus, batch_size=1000, max_vocab_size=None):
+    def __init__(self, corpus_path, batch_size=1000, max_vocab_size=None,
+                 lower=False):
+
         self.batch_size = batch_size
+        self.corpus_path = corpus_path
+        self.lower = lower  # whether to lowercase everything
 
         self.max_vocab_size = max_vocab_size
 
@@ -92,14 +97,12 @@ class ClassLMClusters(object):
         self.cluster_bits = {}
 
         # find the most frequent words
-        # apply document count threshold.
-        # include up to max_vocab_size words (or fewer if there are ties).
         self.vocab = {}
         self.reverse_vocab = []
-        self.create_vocab(corpus)
+        self.create_vocab()
 
         # create sets of documents that each word appears in
-        self.create_index(corpus)
+        self.create_index()
 
         # make a copy of the list of words, as a queue for making new clusters
         word_queue = list(range(len(self.vocab)))
@@ -129,16 +132,35 @@ class ClassLMClusters(object):
 
             self.cluster_counter += 1
 
-    def create_index(self, corpus):
-        for w1, w2 in zip(corpus, corpus[1:]):
+    def corpus_generator(self):
+        with open(self.corpus_path, 'rb') as f:
+            i = 0
+            for line in f:
+                line = UnicodeDammit(line.strip()).unicode_markup
+                if line:
+                    if self.lower:
+                        line = line.lower()
+                    i += 1
+                    if i % 100000 == 0:
+                        logging.info('Read {} nonblank lines'.format(i))
+                    for tok in re.split(r'\s+', line):
+                        yield tok
+
+    def create_index(self):
+        corpus_iter1, corpus_iter2 = itertools.tee(self.corpus_generator())
+
+        # increment one iterator to get consecutive tokens
+        next(corpus_iter2)
+
+        for w1, w2 in zip(corpus_iter1, corpus_iter2):
             if w1 in self.vocab and w2 in self.vocab:
                 self.trans[self.vocab[w1]][self.vocab[w2]] += 1
 
         logging.info('{} word tokens were processed.'.format(self.num_tokens))
 
-    def create_vocab(self, corpus):
+    def create_vocab(self):
         tmp_counts = defaultdict(int)
-        for w in corpus:
+        for w in self.corpus_generator():
             tmp_counts[w] += 1
             self.num_tokens += 1
 
@@ -367,13 +389,13 @@ def main():
     parser.add_argument('--batch_size', help='number of clusters to merge at' +
                         ' one time (runtime is quadratic in this value)',
                         default=1000, type=int)
+    parser.add_argument('--lower', help='lowercase the input',
+                        action='store_true')
     args = parser.parse_args()
 
-    corpus = read_corpus(args.input_path)
-
-    c = ClassLMClusters(corpus,
+    c = ClassLMClusters(args.input_path,
                         max_vocab_size=args.max_vocab_size,
-                        batch_size=args.batch_size)
+                        batch_size=args.batch_size, lower=args.lower)
     c.save_clusters(args.output_path)
 
 
