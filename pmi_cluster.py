@@ -152,8 +152,6 @@ class DocumentLevelClusters(object):
         self.word_counts = word_counts
 
         # find the most frequent words
-        # apply document count threshold.
-        # include up to max_vocab_size words (or fewer if there are ties).
         self.words = sorted(self.word_counts.keys(),
                             key=lambda w: self.word_counts[w], reverse=True)
 
@@ -199,7 +197,6 @@ class DocumentLevelClusters(object):
                 if doc_id not in self.index[w]:
                     self.index[w][doc_id] = 0
                 self.index[w][doc_id] += 1
-                self.word_counts[w] += 1
             doc_id += 1
 
         self.num_docs = doc_id
