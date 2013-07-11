@@ -228,14 +228,20 @@ class DocumentLevelClusters(object):
             self.current_batch_scores[c1][c2] = score
 
     def find_best(self):
-        c1, c2, best_score = None, None, None
-        for tmp1, d in self.current_batch_scores.items():
-            for tmp2, score in d.items():
-                # break ties randomly (randint takes inclusive args!)
-                if best_score is None or score > best_score \
-                   or (score == best_score and random.randint(0, 1) == 1):
+        best_score = None
+        argmax = None
+
+        for c1, d in self.current_batch_scores.items():
+            for c2, score in d.items():
+                if best_score is None or score > best_score:
+                    argmax = [(c1, c2)]
                     best_score = score
-                    c1, c2 = tmp1, tmp2
+                elif score == best_score:
+                    argmax.append((c1, c2))
+
+        # break ties randomly (randint takes inclusive args!)
+        c1, c2 = argmax[random.randint(0, len(argmax) - 1)]
+
         return c1, c2
 
     def merge(self, c1, c2):

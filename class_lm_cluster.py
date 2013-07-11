@@ -264,17 +264,21 @@ class ClassLMClusters(object):
 
     def find_best(self):
         best_score = float('-inf')
-        c1, c2 = None, None
-        for tmp1 in self.L:
-            for tmp2, score in self.L[tmp1].items():
-                # break ties randomly (randint takes inclusive args!)
-                if score > best_score \
-                   or (score == best_score and random.randint(0, 1) == 1):
+        argmax = None
+
+        for c1 in self.L:
+            for c2, score in self.L[c1].items():
+                if score > best_score:
+                    argmax = [(c1, c2)]
                     best_score = score
-                    c1, c2 = tmp1, tmp2
+                elif score == best_score:
+                    argmax.append((c1, c2))
 
         if isnan(best_score) or isinf(best_score):
             raise ValueError("bad value for score: {}".format(best_score))
+
+        # break ties randomly (randint takes inclusive args!)
+        c1, c2 = argmax[random.randint(0, len(argmax) - 1)]
 
         return c1, c2
 
