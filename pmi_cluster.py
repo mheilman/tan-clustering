@@ -98,7 +98,7 @@ def make_word_counts(document_generator, max_vocab_size=None, min_word_count=1):
     too_rare = min_word_count - 1
     if min_word_count > 1 and max_vocab_size is not None:
         logging.info("max_vocab_size and min_word_count both set." +
-                     "  Ignoring min_word_count.".format(too_rare))
+                     "  Ignoring min_word_count.")
 
     words = sorted(res.keys(), key=lambda w: res[w], reverse=True)
 
