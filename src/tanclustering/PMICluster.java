@@ -2,10 +2,15 @@ package tanclustering;
 import java.util.*;
 import java.io.*;
 import java.util.Map.Entry;
+import java.util.concurrent.*;
 
 // uses commons-io-2.4.jar
 import org.apache.commons.io.FileUtils;
 
+
+//TODO figure out why there are slight differences between the java and python versions...  hash table implementations? random number generation?
+//TODO comma gets two clusters apparently...
+//TODO intern counts
 
 public class PMICluster {
 	public class Tuple<X, Y>{
@@ -40,11 +45,61 @@ public class PMICluster {
 
 	private List<Integer> currentBatch = new ArrayList<Integer>();
 	private Map<Integer, Map<Integer, Double> > currentBatchScores = new HashMap<Integer, Map<Integer, Double> >();
+	
+	private int numThreads;
+	private ExecutorService executor = null;
+
+	public class PairScorerRunnable implements Runnable {
+		public List<Double> results = null;
+		public List<Tuple<Integer, Integer> > pairList = null;
+		public volatile boolean isDone = false;  // The volatile keyword may help make sure the main thread sees the latest value.  Not sure though.
+
+		public PairScorerRunnable(List<Tuple<Integer, Integer> > pairList){
+			this.pairList = pairList;
+		}
+
+		public void run() {
+			results = new ArrayList<Double>();
+			for(Tuple<Integer, Integer> tuple: pairList){
+				int c1 = tuple.v1;
+				int c2 = tuple.v2;
+
+				int paircount = 0;
+
+				Map<Integer, Integer> index1 = index.get(c1);
+				Map<Integer, Integer> index2 = index.get(c2);
+				if(index1.size() > index2.size()){
+					Map<Integer, Integer> tmp = index1;
+					index1 = index2;
+					index2 = tmp;
+				}
+
+				for(Integer docID: index1.keySet()){
+					if(index2.containsKey(docID)){
+						paircount += index1.get(docID) * index2.get(docID);
+					}
+				}
+
+				if(!currentBatchScores.containsKey(c1)){
+					currentBatchScores.put(c1, new HashMap<Integer, Double>());
+				}
+
+				if(paircount == 0){
+					results.add(Double.NEGATIVE_INFINITY);  // log(0)
+				}else{
+					double score = Math.log(paircount) - Math.log(wordCounts.get(c1)) - Math.log(wordCounts.get(c2));
+					results.add(score);
+				}
+			}
+			isDone = true;
+		}
+	}
 
 
-	public PMICluster(String inputPath, boolean lower, int maxVocabSize, int minWordCount, int batchSize){
+	public PMICluster(String inputPath, boolean lower, int maxVocabSize, int minWordCount, int batchSize, int numThreads){
 		this.batchSize = batchSize;
 		this.lower = lower;
+		this.numThreads = numThreads;
 		try{
 			init(inputPath, maxVocabSize, minWordCount);
 		}catch(IOException e){
@@ -54,13 +109,15 @@ public class PMICluster {
 
 
 	private void init(String inputPath, int maxVocabSize, int minWordCount) throws IOException{
+		executor = Executors.newFixedThreadPool(numThreads);
+
 		makeWordCounts(inputPath, maxVocabSize, minWordCount);
 
 		// make a copy of the list of words, as a queue for making new clusters
 		LinkedList<Integer> wordQueue = new LinkedList<Integer>();
 		for(String w: words){
 			int wordID = wordIDs.get(w);
-			wordQueue.add(clusterCounter);
+			wordQueue.add(wordID);
 			clusterCounter = wordID;
 		}
 		clusterCounter++;
@@ -70,7 +127,7 @@ public class PMICluster {
 
 		// score potential clusters, starting with the most frequent words.
 		// also, remove the batch from the queue
-		for(int i = 0; i < batchSize && wordQueue.size() > 0; i++){
+		for(int i = 0; i <= batchSize && wordQueue.size() > 0; i++){
 			currentBatch.add(wordQueue.pop());
 		}
 		makePairScores(allPairs(currentBatch));
@@ -92,6 +149,8 @@ public class PMICluster {
 
 			clusterCounter++;
 		}
+
+		executor.shutdownNow();
 	}
 
 	private String idToWord(int id){
@@ -158,40 +217,40 @@ public class PMICluster {
 
 
 	private void makePairScores(List<Tuple<Integer, Integer> > pairList){
-		for(Tuple<Integer, Integer> tuple: pairList){
-			int c1 = tuple.v1;
-			int c2 = tuple.v2;
+		List<PairScorerRunnable> runnables = new ArrayList<PairScorerRunnable>();
 
-			int paircount = 0;
+		int n = pairList.size();
+		PairScorerRunnable runnable;
+		double chunkSize = (double) n / numThreads;
+		for(int i = 0; i < numThreads; i++){
+			runnable = new PairScorerRunnable(pairList.subList((int) (i * chunkSize), (int) ((i + 1) * chunkSize)));
+			runnables.add(runnable);
+			executor.execute(runnable);
+		}
 
-			Map<Integer, Integer> index1 = index.get(c1);
-			Map<Integer, Integer> index2 = index.get(c2);
-			if(index1.size() > index2.size()){
-				Map<Integer, Integer> tmp = index1;
-				index1 = index2;
-				index2 = tmp;
-			}
-
-			for(Integer docID: index1.keySet()){
-				if(index2.containsKey(docID)){
-					paircount += index1.get(docID) * index2.get(docID);
+		List<Double> scores = new ArrayList<Double>();
+		try{
+			for(int i = 0; i < numThreads; i++){
+				runnable = runnables.get(i);
+				while(!runnable.isDone){
+					Thread.sleep(1);
 				}
+				scores.addAll(runnable.results);
 			}
+		}catch(InterruptedException e){
+			e.printStackTrace();
+		}
 
-			if(!currentBatchScores.containsKey(c1)){
-				currentBatchScores.put(c1, new HashMap<Integer, Double>());
-			}
-
-			if(paircount == 0){
-				currentBatchScores.get(c1).put(c2, Double.NEGATIVE_INFINITY);  // log(0)
-			}else{
-				double score = Math.log(paircount) - Math.log(wordCounts.get(c1)) - Math.log(wordCounts.get(c2));
-				currentBatchScores.get(c1).put(c2, score);
-			}
+		for(int i = 0; i < pairList.size(); i++){
+			Tuple<Integer, Integer> pair = pairList.get(i);
+			int c1 = pair.v1;
+			int c2 = pair.v2;
+			currentBatchScores.get(c1).put(c2, scores.get(i));
 		}
 	}
 
 	private Tuple<Integer, Integer> findBest(){
+
 		double bestScore = Double.NEGATIVE_INFINITY;
 		List<Tuple<Integer, Integer> > argmaxList = new ArrayList<Tuple<Integer, Integer> >();
 
@@ -199,11 +258,13 @@ public class PMICluster {
 		int c2;
 		double score;
 
+		int n=0;
 		for(Entry<Integer, Map<Integer, Double> > entry1: currentBatchScores.entrySet()){
 			c1 = entry1.getKey();
 			for(Entry<Integer, Double> entry2: entry1.getValue().entrySet()){
 				c2 = entry2.getKey();
 				score = entry2.getValue();
+				n++;
 				if(score > bestScore){
 					argmaxList = new ArrayList<>();
 					argmaxList.add(new Tuple<Integer, Integer>(c1, c2));
@@ -356,7 +417,6 @@ public class PMICluster {
 
 		System.err.println("Created vocabulary with the " + words.size() + " words that occurred at least " + (tooRare + 1) + " times.");
 
-		Set<String> wordSet = new HashSet<String>();
 		int wordID = 0;
 		for(String w: words){
 			wordIDs.put(w, wordID);
@@ -391,8 +451,8 @@ public class PMICluster {
 
 
 	public static void main(String[] args) {
-		if(args.length != 6){
-			System.err.println("args: <inputPath> <outputPath> <lowercase (true/false)> <minWordCount> <maxVocabSize> <batchSize>");
+		if(args.length != 7){
+			System.err.println("args: <inputPath> <outputPath> <lowercase (true/false)> <minWordCount> <maxVocabSize> <batchSize> <numThreads>");
 			System.exit(0);
 		}
 
@@ -402,15 +462,17 @@ public class PMICluster {
 		int minWordCount = Integer.parseInt(args[3]);
 		int maxVocabSize = Integer.parseInt(args[4]);
 		int batchSize = Integer.parseInt(args[5]);
+		int numThreads = Integer.parseInt(args[6]);
 
 		System.err.println("inputPath=" + inputPath + "\n" +
 						   "outputPath=" + outputPath + "\n" +
 						   "lower=" + lower + "\n" +
 						   "minWordCount=" + minWordCount + "\n" +
 						   "maxVocabSize=" + maxVocabSize + "\n" + 
-						   "batchSize=" + batchSize);
+						   "batchSize=" + batchSize + "\n" +
+						   "numThreads=" + numThreads);
 
-		PMICluster c = new PMICluster(inputPath, lower, maxVocabSize, minWordCount, batchSize);
+		PMICluster c = new PMICluster(inputPath, lower, maxVocabSize, minWordCount, batchSize, numThreads);
 		
 		c.saveClusters(outputPath);
 	}
