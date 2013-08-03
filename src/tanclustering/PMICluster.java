@@ -17,7 +17,10 @@ public class PMICluster {
 		public Tuple(X v1, Y v2){
 			this.v1 = v1;
 			this.v2 = v2;
-		} 
+		}
+		public String toString(){
+			return "(" + v1 + ", " + v2 + ")";
+		}
 	}
 
 	private Map<String, Integer> wordIDs = new HashMap<String, Integer>();
@@ -47,7 +50,7 @@ public class PMICluster {
 	private ExecutorService executor = null;
 
 	public class PairScorerRunnable implements Runnable {
-		public List<Double> results = null;
+		public volatile List<Double> results = null;
 		public List<Tuple<Integer, Integer> > pairList = null;
 		public volatile boolean isDone = false;  // The volatile keyword may help make sure the main thread sees the latest value.  Not sure though.
 
@@ -75,10 +78,6 @@ public class PMICluster {
 					if(index2.containsKey(docID)){
 						paircount += index1.get(docID) * index2.get(docID);
 					}
-				}
-
-				if(!currentBatchScores.containsKey(c1)){
-					currentBatchScores.put(c1, new HashMap<Integer, Double>());
 				}
 
 				if(paircount == 0){
@@ -192,21 +191,35 @@ public class PMICluster {
 	}
 
 
-	private <X, Y> List<Tuple<X, X> > allPairs(List<X> collection){
-		List<Tuple<X, X> > res = new ArrayList<Tuple<X, X> >();
+	private List<Tuple<Integer, Integer> > allPairs(List<Integer> collection){
+		List<Tuple<Integer, Integer> > res = new ArrayList<Tuple<Integer, Integer> >();
 		for(int i = 0; i < collection.size(); i++){
 			for(int j = i + 1; j < collection.size(); j++){
-				res.add(new Tuple<X, X>(collection.get(i), collection.get(j)));
+				Integer v1 = collection.get(i);
+				Integer v2 = collection.get(j);
+				if(v1 > v2){
+					Integer tmp = v1;
+					v1 = v2;
+					v2 = tmp;
+				}
+				res.add(new Tuple<Integer, Integer>(v1, v2));
 			}
 		}
 		return res;
 	}
 
-	private <X, Y> List<Tuple<X, X> > productPairs(List<X> collection1, List<X> collection2){
-		List<Tuple<X, X> > res = new ArrayList<Tuple<X, X> >();
+	private List<Tuple<Integer, Integer> > productPairs(List<Integer> collection1, List<Integer> collection2){
+		List<Tuple<Integer, Integer> > res = new ArrayList<Tuple<Integer, Integer> >();
 		for(int i = 0; i < collection1.size(); i++){
 			for(int j = 0; j < collection2.size(); j++){
-				res.add(new Tuple<X, X>(collection1.get(i), collection2.get(j)));
+				Integer v1 = collection1.get(i);
+				Integer v2 = collection2.get(j);
+				if(v1 > v2){
+					Integer tmp = v1;
+					v1 = v2;
+					v2 = tmp;
+				}
+				res.add(new Tuple<Integer, Integer>(v1, v2));
 			}
 		}
 		return res;
@@ -242,9 +255,15 @@ public class PMICluster {
 			Tuple<Integer, Integer> pair = pairList.get(i);
 			Integer c1 = pair.v1;
 			Integer c2 = pair.v2;
+
+			if(!currentBatchScores.containsKey(c1)){
+				currentBatchScores.put(c1, new HashMap<Integer, Double>());
+			}
+
 			currentBatchScores.get(c1).put(c2, scores.get(i));
 		}
 	}
+
 
 	private Tuple<Integer, Integer> findBest(){
 
@@ -319,7 +338,7 @@ public class PMICluster {
 	}
 
 
-	private void updateBatch(Integer c1, Integer c2, List<Integer> freqWords){
+	private void updateBatch(Integer c1, Integer c2, List<Integer> wordQueue){
 		// remove the clusters that were merged (and the scored pairs for them)
 		List<Integer> oldBatch = currentBatch;
 		currentBatch = new ArrayList<Integer>();
@@ -339,14 +358,16 @@ public class PMICluster {
 		// find what to add to the current batch
 		List<Integer> newItems = new ArrayList<Integer>();
 		newItems.add(clusterCounter);
-		if(freqWords.size() > 0){
-			newItems.add(freqWords.get(0));
-			freqWords.remove(0);
+		if(wordQueue.size() > 0){
+			newItems.add(wordQueue.get(0));
+			wordQueue.remove(0);
 		}
 
 		// add to the batch and score the new cluster pairs that result
 		makePairScores(productPairs(currentBatch, newItems));
-		makePairScores(allPairs(newItems));
+		if(newItems.size() > 1){
+			makePairScores(allPairs(newItems));
+		}
 
 		// note: make the scores first with itertools.product
 		// (before adding new_items to current_batch) to avoid duplicates
