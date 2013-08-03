@@ -7,10 +7,7 @@ import java.util.concurrent.*;
 // uses commons-io-2.4.jar
 import org.apache.commons.io.FileUtils;
 
-
-//TODO figure out why there are slight differences between the java and python versions...  hash table implementations? random number generation?
-//TODO comma gets two clusters apparently...
-//TODO intern counts
+//TODO use trove, COLT, or apache commons collections for hash maps (?)
 
 public class PMICluster {
 	public class Tuple<X, Y>{
@@ -29,7 +26,7 @@ public class PMICluster {
 	private Map<Integer, Integer> clusterParents = new HashMap<Integer, Integer>();
 
 	// the 0/1 bit to add when walking up the hierarchy from a word to the top-level cluster
-	private Map<Integer, String> clusterBits = new HashMap<Integer, String>();
+	private Map<Integer, Integer> clusterBits = new HashMap<Integer, Integer>();
 
 	private List<String> words = new ArrayList<String>();
 	private Map<Integer, Integer> wordCounts = new HashMap<Integer, Integer>();
@@ -38,7 +35,7 @@ public class PMICluster {
 	// clusterID -> {docID -> counts}
 	private Map<Integer, Map<Integer, Integer> > index = new HashMap<Integer, Map<Integer, Integer> >();
 
-	private int clusterCounter = 0;
+	private Integer clusterCounter = 0;
 
 	private int batchSize = 0;
 	private boolean lower = false;
@@ -61,8 +58,8 @@ public class PMICluster {
 		public void run() {
 			results = new ArrayList<Double>();
 			for(Tuple<Integer, Integer> tuple: pairList){
-				int c1 = tuple.v1;
-				int c2 = tuple.v2;
+				Integer c1 = tuple.v1;
+				Integer c2 = tuple.v2;
 
 				int paircount = 0;
 
@@ -116,7 +113,7 @@ public class PMICluster {
 		// make a copy of the list of words, as a queue for making new clusters
 		LinkedList<Integer> wordQueue = new LinkedList<Integer>();
 		for(String w: words){
-			int wordID = wordIDs.get(w);
+			Integer wordID = wordIDs.get(w);
 			wordQueue.add(wordID);
 			clusterCounter = wordID;
 		}
@@ -135,8 +132,8 @@ public class PMICluster {
 		while(currentBatch.size() > 1){
 			// find the best pair of words/clusters to merge
 			Tuple<Integer, Integer> best = findBest();
-			int c1 = best.v1;
-			int c2 = best.v2;
+			Integer c1 = best.v1;
+			Integer c2 = best.v2;
 
 			// merge the clusters in the index
 			merge(c1, c2);
@@ -153,7 +150,7 @@ public class PMICluster {
 		executor.shutdownNow();
 	}
 
-	private String idToWord(int id){
+	private String idToWord(Integer id){
 		if(id < words.size()){
 			return words.get(id);
 		}else{
@@ -177,7 +174,7 @@ public class PMICluster {
 				if(!wordIDs.containsKey(tok)){
 					continue;
 				}
-				int wordID = wordIDs.get(tok);
+				Integer wordID = wordIDs.get(tok);
 
 				if(!index.containsKey(wordID)){
 					index.put(wordID, new HashMap<Integer, Integer>());
@@ -186,7 +183,7 @@ public class PMICluster {
 				if(!index.get(wordID).containsKey(docID)){
 					index.get(wordID).put(docID, 0);
 				}
-				int tmpVal = index.get(wordID).get(docID);
+				Integer tmpVal = index.get(wordID).get(docID);
 				index.get(wordID).put(docID, tmpVal + 1);
 			}
 			docID = Integer.valueOf(docID + 1);
@@ -243,8 +240,8 @@ public class PMICluster {
 
 		for(int i = 0; i < pairList.size(); i++){
 			Tuple<Integer, Integer> pair = pairList.get(i);
-			int c1 = pair.v1;
-			int c2 = pair.v2;
+			Integer c1 = pair.v1;
+			Integer c2 = pair.v2;
 			currentBatchScores.get(c1).put(c2, scores.get(i));
 		}
 	}
@@ -252,53 +249,57 @@ public class PMICluster {
 	private Tuple<Integer, Integer> findBest(){
 
 		double bestScore = Double.NEGATIVE_INFINITY;
-		List<Tuple<Integer, Integer> > argmaxList = new ArrayList<Tuple<Integer, Integer> >();
 
-		int c1;
-		int c2;
+		List<Integer> argmaxListC1 = new ArrayList<Integer>();
+		List<Integer> argmaxListC2 = new ArrayList<Integer>();
+
+		Integer c1;
+		Integer c2;
 		double score;
 
-		int n=0;
 		for(Entry<Integer, Map<Integer, Double> > entry1: currentBatchScores.entrySet()){
 			c1 = entry1.getKey();
 			for(Entry<Integer, Double> entry2: entry1.getValue().entrySet()){
 				c2 = entry2.getKey();
 				score = entry2.getValue();
-				n++;
 				if(score > bestScore){
-					argmaxList = new ArrayList<>();
-					argmaxList.add(new Tuple<Integer, Integer>(c1, c2));
+					argmaxListC1.clear();
+					argmaxListC2.clear();
+					argmaxListC1.add(c1);
+					argmaxListC2.add(c2);
 					bestScore = score;
 				}else if(score == bestScore){
-					argmaxList.add(new Tuple<Integer, Integer>(c1, c2));
+					argmaxListC1.add(c1);
+					argmaxListC2.add(c2);
 				}
 			}
 		}
 
 		// break ties randomly
-		Tuple<Integer, Integer> res = argmaxList.get(rng.nextInt(argmaxList.size()));
+		int r = rng.nextInt(argmaxListC1.size());
+		Tuple<Integer, Integer> res = new Tuple<Integer, Integer>(argmaxListC1.get(r), argmaxListC2.get(r));
 		return res;
 	}
 
 
-	private void merge(int c1, int c2){
+	private void merge(Integer c1, Integer c2){
 		clusterParents.put(c1, clusterCounter);
 		clusterParents.put(c2, clusterCounter);
 
 		int r = rng.nextInt(2);
-		clusterBits.put(c1, String.valueOf(r));  // assign bits randomly
-		clusterBits.put(c2, String.valueOf(1 - r));
+		clusterBits.put(c1, r);  // assign bits randomly
+		clusterBits.put(c2, 1 - r);
 
 		// initialize the document counts of the new cluster with the counts
 		// for one of the two child clusters.  then, add the counts from the
 		// other child cluster
 		Map<Integer, Integer> indexNew = index.get(c1);
 		index.put(clusterCounter, indexNew);
-		for(int docID: index.get(c2).keySet()){
+		for(Integer docID: index.get(c2).keySet()){
 			if(!indexNew.containsKey(docID)){
 				indexNew.put(docID, 0);
 			}
-			int tmpVal = indexNew.get(docID);
+			Integer tmpVal = indexNew.get(docID);
 			indexNew.put(docID, tmpVal + index.get(c2).get(docID));
 		}
 
@@ -318,7 +319,7 @@ public class PMICluster {
 	}
 
 
-	private void updateBatch(int c1, int c2, List<Integer> freqWords){
+	private void updateBatch(Integer c1, Integer c2, List<Integer> freqWords){
 		// remove the clusters that were merged (and the scored pairs for them)
 		List<Integer> oldBatch = currentBatch;
 		currentBatch = new ArrayList<Integer>();
@@ -417,7 +418,7 @@ public class PMICluster {
 
 		System.err.println("Created vocabulary with the " + words.size() + " words that occurred at least " + (tooRare + 1) + " times.");
 
-		int wordID = 0;
+		Integer wordID = 0;
 		for(String w: words){
 			wordIDs.put(w, wordID);
 			wordCounts.put(wordID, wordCountsTmp.get(w));
@@ -428,10 +429,10 @@ public class PMICluster {
 
 	private String getBitstring(String w){
 		// walk up the cluster hierarchy until there is no parent cluster
-		int curCluster = wordIDs.get(w);
+		Integer curCluster = wordIDs.get(w);
 		String bitstring = "";
 		while(clusterParents.containsKey(curCluster)){
-			bitstring = clusterBits.get(curCluster) + bitstring;
+			bitstring = String.valueOf(clusterBits.get(curCluster)) + bitstring;
 			curCluster = clusterParents.get(curCluster);
 		}
 		return bitstring;
@@ -444,6 +445,7 @@ public class PMICluster {
 			for(String w: words){
 				pw.println(w + "\t" + getBitstring(w) + "\t" + wordCounts.get(wordIDs.get(w)));
 			}
+			pw.close();
 		}catch(IOException e){
 			e.printStackTrace();
 		}
