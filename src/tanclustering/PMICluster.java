@@ -3,6 +3,7 @@ import java.util.*;
 import java.io.*;
 import java.util.Map.Entry;
 import java.util.concurrent.*;
+import java.util.logging.Logger;
 
 // uses commons-io-2.4.jar
 import org.apache.commons.io.FileUtils;
@@ -10,6 +11,8 @@ import org.apache.commons.io.FileUtils;
 //TODO use trove, COLT, or apache commons collections for hash maps (?)
 
 public class PMICluster {
+	private final static Logger LOGGER = Logger.getLogger(PMICluster.class.getName()); 
+
 	public class Tuple<X, Y>{
 		public final X v1;
 		public final Y v2;
@@ -141,7 +144,7 @@ public class PMICluster {
 			// and the next most frequent word (if available)
 			updateBatch(c1, c2, wordQueue);
 
-			System.err.println(idToWord(c1) + " AND " + idToWord(c2) + " WERE MERGED INTO " + clusterCounter + ". " + (currentBatch.size() + wordQueue.size() - 1) + " REMAIN.");
+			LOGGER.info(idToWord(c1) + " AND " + idToWord(c2) + " WERE MERGED INTO " + clusterCounter + ". " + (currentBatch.size() + wordQueue.size() - 1) + " REMAIN.");
 
 			clusterCounter++;
 		}
@@ -187,7 +190,7 @@ public class PMICluster {
 			}
 			docID = Integer.valueOf(docID + 1);
 		}
-		System.err.println(docID + " documents were indexed.");
+		LOGGER.info(docID + " documents were indexed.");
 	}
 
 
@@ -404,7 +407,7 @@ public class PMICluster {
 
 		int tooRare = minWordCount - 1;
 		if(minWordCount > 1 && maxVocabSize > 0){
-			System.err.println("maxVocabSize and minWordCount both set.  Ignoring minWordCount.");
+			LOGGER.info("maxVocabSize and minWordCount both set.  Ignoring minWordCount.");
 		}
 
 		List<Entry<String, Integer> > wordEntries = new ArrayList<Entry<String, Integer> >();
@@ -422,7 +425,7 @@ public class PMICluster {
 				tooRare = wordCountsTmp.get(words.get(maxVocabSize));
 				if(tooRare == wordCountsTmp.get(words.get(0))){
 					tooRare += 1;
-					System.err.println("max_vocab_size too low.  Using all words that appeared > " + tooRare + " times.");
+					LOGGER.info("max_vocab_size too low.  Using all words that appeared > " + tooRare + " times.");
 				}
 			}
 		}
@@ -437,7 +440,7 @@ public class PMICluster {
 			}
 		}
 
-		System.err.println("Created vocabulary with the " + words.size() + " words that occurred at least " + (tooRare + 1) + " times.");
+		LOGGER.info("Created vocabulary with the " + words.size() + " words that occurred at least " + (tooRare + 1) + " times.");
 
 		Integer wordID = 0;
 		for(String w: words){
@@ -487,7 +490,7 @@ public class PMICluster {
 		int batchSize = Integer.parseInt(args[5]);
 		int numThreads = Integer.parseInt(args[6]);
 
-		System.err.println("inputPath=" + inputPath + "\n" +
+		LOGGER.info("inputPath=" + inputPath + "\n" +
 						   "outputPath=" + outputPath + "\n" +
 						   "lower=" + lower + "\n" +
 						   "minWordCount=" + minWordCount + "\n" +
