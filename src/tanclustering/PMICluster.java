@@ -122,15 +122,18 @@ public class PMICluster {
 		clusterCounter++;
 
 		// create sets of documents that each word appears in
+		LOGGER.info("creating index...");
 		createIndex(inputPath);
 
 		// score potential clusters, starting with the most frequent words.
 		// also, remove the batch from the queue
+		LOGGER.info("computing initial scores...");
 		for(int i = 0; i <= batchSize && wordQueue.size() > 0; i++){
 			currentBatch.add(wordQueue.pop());
 		}
 		makePairScores(allPairs(currentBatch));
 
+		LOGGER.info("clustering...");
 		while(currentBatch.size() > 1){
 			// find the best pair of words/clusters to merge
 			Tuple<Integer, Integer> best = findBest();
@@ -166,6 +169,10 @@ public class PMICluster {
 		String doc;
 		Integer docID = Integer.valueOf(0);
 		while(it.hasNext()){
+			if(docID % 10000 == 0){
+				LOGGER.info("Indexing document " + docID + ".");
+			}
+
 			doc = it.next();
 			String[] toks = doc.trim().split(" ");
 			for(String tok: toks){
