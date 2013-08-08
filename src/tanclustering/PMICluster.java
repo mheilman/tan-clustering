@@ -52,17 +52,15 @@ public class PMICluster {
 	private int numThreads;
 	private ExecutorService executor = null;
 
-	public class PairScorerRunnable implements Runnable {
-		public volatile List<Double> results = null;
+	public class PairScorerCallable implements Callable {
 		public List<Tuple<Integer, Integer> > pairList = null;
-		public volatile boolean isDone = false;  // The volatile keyword may help make sure the main thread sees the latest value.  Not sure though.
 
-		public PairScorerRunnable(List<Tuple<Integer, Integer> > pairList){
+		public PairScorerCallable(List<Tuple<Integer, Integer> > pairList){
 			this.pairList = pairList;
 		}
 
-		public void run() {
-			results = new ArrayList<Double>();
+		public List<Double> call() {
+			List<Double> res = new ArrayList<Double>();
 			for(Tuple<Integer, Integer> tuple: pairList){
 				Integer c1 = tuple.v1;
 				Integer c2 = tuple.v2;
@@ -84,13 +82,16 @@ public class PMICluster {
 				}
 
 				if(paircount == 0){
-					results.add(Double.NEGATIVE_INFINITY);  // log(0)
+					res.add(Double.NEGATIVE_INFINITY);  // log(0)
 				}else{
 					double score = Math.log(paircount) - Math.log(wordCounts.get(c1)) - Math.log(wordCounts.get(c2));
-					results.add(score);
+					res.add(score);
 				}
 			}
-			isDone = true;
+
+			assert res.size() == pairList.size();
+
+			return res;
 		}
 	}
 
@@ -218,12 +219,12 @@ public class PMICluster {
 		return res;
 	}
 
-	private List<Tuple<Integer, Integer> > productPairs(List<Integer> collection1, List<Integer> collection2){
+	private List<Tuple<Integer, Integer> > newPairs(List<Integer> newItems){
 		List<Tuple<Integer, Integer> > res = new ArrayList<Tuple<Integer, Integer> >();
-		for(int i = 0; i < collection1.size(); i++){
-			for(int j = 0; j < collection2.size(); j++){
-				Integer v1 = collection1.get(i);
-				Integer v2 = collection2.get(j);
+		for(int i = 0; i < currentBatch.size(); i++){
+			for(int j = 0; j < newItems.size(); j++){
+				Integer v1 = currentBatch.get(i);
+				Integer v2 = newItems.get(j);
 				if(v1 > v2){
 					Integer tmp = v1;
 					v1 = v2;
@@ -232,34 +233,43 @@ public class PMICluster {
 				res.add(new Tuple<Integer, Integer>(v1, v2));
 			}
 		}
+
+		res.addAll(allPairs(newItems));
+
 		return res;
 	}
 
 
 	private void makePairScores(List<Tuple<Integer, Integer> > pairList){
-		List<PairScorerRunnable> runnables = new ArrayList<PairScorerRunnable>();
+		List<Future<List<Double> > > task_results = new ArrayList<Future<List<Double> > >();
 
 		int n = pairList.size();
-		PairScorerRunnable runnable;
+
+		if(n == 0){
+			return;
+		}
+
+		PairScorerCallable task;
 		double chunkSize = (double) n / numThreads;
 		for(int i = 0; i < numThreads; i++){
-			runnable = new PairScorerRunnable(pairList.subList((int) (i * chunkSize), (int) ((i + 1) * chunkSize)));
-			runnables.add(runnable);
-			executor.execute(runnable);
+			task = new PairScorerCallable(pairList.subList((int) (i * chunkSize), (int) ((i + 1) * chunkSize)));
+			task_results.add(executor.submit(task));
 		}
 
 		List<Double> scores = new ArrayList<Double>();
 		try{
 			for(int i = 0; i < numThreads; i++){
-				runnable = runnables.get(i);
-				while(!runnable.isDone){
-					Thread.sleep(1);
-				}
-				scores.addAll(runnable.results);
+				scores.addAll(task_results.get(i).get());
 			}
+		}catch(ExecutionException e){
+			e.printStackTrace();
+			System.exit(1);
 		}catch(InterruptedException e){
 			e.printStackTrace();
+			System.exit(1);
 		}
+
+		assert scores.size() == pairList.size();
 
 		for(int i = 0; i < pairList.size(); i++){
 			Tuple<Integer, Integer> pair = pairList.get(i);
@@ -272,6 +282,7 @@ public class PMICluster {
 
 			currentBatchScores.get(c1).put(c2, scores.get(i));
 		}
+
 	}
 
 
@@ -373,11 +384,10 @@ public class PMICluster {
 			wordQueue.remove(0);
 		}
 
+		assert newItems.size() > 0;
+
 		// add to the batch and score the new cluster pairs that result
-		makePairScores(productPairs(currentBatch, newItems));
-		if(newItems.size() > 1){
-			makePairScores(allPairs(newItems));
-		}
+		makePairScores(newPairs(newItems));
 
 		// note: make the scores first with itertools.product
 		// (before adding new_items to current_batch) to avoid duplicates
@@ -498,12 +508,12 @@ public class PMICluster {
 		int numThreads = Integer.parseInt(args[6]);
 
 		LOGGER.info("inputPath=" + inputPath + "\n" +
-						   "outputPath=" + outputPath + "\n" +
-						   "lower=" + lower + "\n" +
-						   "minWordCount=" + minWordCount + "\n" +
-						   "maxVocabSize=" + maxVocabSize + "\n" + 
-						   "batchSize=" + batchSize + "\n" +
-						   "numThreads=" + numThreads);
+					"outputPath=" + outputPath + "\n" +
+					"lower=" + lower + "\n" +
+					"minWordCount=" + minWordCount + "\n" +
+					"maxVocabSize=" + maxVocabSize + "\n" + 
+					"batchSize=" + batchSize + "\n" +
+					"numThreads=" + numThreads);
 
 		PMICluster c = new PMICluster(inputPath, lower, maxVocabSize, minWordCount, batchSize, numThreads);
 		
