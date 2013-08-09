@@ -251,9 +251,17 @@ public class PMICluster {
 
 		PairScorerCallable task;
 		double chunkSize = (double) n / numThreads;
+		int startIdx = 0;
+		int endIdx;
 		for(int i = 0; i < numThreads; i++){
-			task = new PairScorerCallable(pairList.subList((int) (i * chunkSize), (int) ((i + 1) * chunkSize)));
+			if(i == numThreads - 1){
+				endIdx = n;
+			}else{
+				endIdx = (int) (chunkSize * (i + 1));
+			}
+			task = new PairScorerCallable(pairList.subList(startIdx, endIdx));
 			task_results.add(executor.submit(task));
+			startIdx = endIdx;
 		}
 
 		List<Double> scores = new ArrayList<Double>();
@@ -262,10 +270,10 @@ public class PMICluster {
 				scores.addAll(task_results.get(i).get());
 			}
 		}catch(ExecutionException e){
-			e.printStackTrace();
+			LOGGER.severe("Exception caught in makePairScores:\n" + e);
 			System.exit(1);
 		}catch(InterruptedException e){
-			e.printStackTrace();
+			LOGGER.severe("Exception caught in makePairScores:\n" + e);
 			System.exit(1);
 		}
 
