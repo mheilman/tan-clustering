@@ -1,4 +1,4 @@
-package tanclustering;
+package com.github.mheilman.tanclustering;
 import java.util.*;
 import java.io.*;
 import java.util.Map.Entry;
