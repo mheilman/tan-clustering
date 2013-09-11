@@ -214,7 +214,9 @@ class ClassLMClusters(object):
                 paircount += self.trans[n1][n2]
 
         if not paircount:
-            return 0
+            # TODO is there some better option than returning 0 (indicating no weight)?
+            # Otherwise, it would return 0 * infinity...
+            return 0.0
 
         count_1 = 0
         count_2 = 0
