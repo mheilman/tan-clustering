@@ -182,7 +182,7 @@ class DocumentLevelClusters(object):
             # and the next most frequent word (if available)
             self.update_batch(c1, c2, word_queue)
 
-            logging.info('{} AND {} WERE MERGED INTO {}. {} REMAIN.'
+            logging.info(u'{} AND {} WERE MERGED INTO {}. {} REMAIN.'
                          .format(c1, c2, self.cluster_counter,
                                  len(self.current_batch) + len(word_queue) - 1))
 
